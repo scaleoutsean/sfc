@@ -1,0 +1,900 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "$$hashKey": "object:2019",
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "limit": 100,
+        "name": "Annotations & Alerts",
+        "showIn": 0,
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Hardware Metrics for NetApp H-Series 615C (IPMI)",
+  "editable": true,
+  "gnetId": 24,
+  "graphTooltip": 1,
+  "id": 12,
+  "iteration": 1591852292413,
+  "links": [],
+  "panels": [
+    {
+      "bgColor": "#8AB8FF",
+      "clockType": "24 hour",
+      "countdownSettings": {
+        "customFormat": null,
+        "endCountdownTime": "2020-06-11T11:32:00.000Z",
+        "endText": "00:00:00"
+      },
+      "datasource": null,
+      "dateSettings": {
+        "dateFormat": "YYYY-MM-DD",
+        "fontSize": "20px",
+        "fontWeight": "normal",
+        "showDate": false
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 26,
+      "mode": "time",
+      "refreshSettings": {
+        "syncWithDashboard": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "target": ""
+        }
+      ],
+      "timeFrom": null,
+      "timeSettings": {
+        "customFormat": "HH:mm:ss",
+        "fontSize": "60px",
+        "fontWeight": "normal"
+      },
+      "timeShift": null,
+      "timezone": "Asia/Taipei",
+      "timezoneSettings": {
+        "fontSize": "12px",
+        "fontWeight": "normal",
+        "showTimezone": false,
+        "zoneFormat": "nameOffset"
+      },
+      "title": "Time",
+      "type": "grafana-clock-panel"
+    },
+    {
+      "datasource": null,
+      "description": "Different systems have different operating ranges and different data centers run at different temperatures. Feel free to examine the details of sensor that's measured and adjust Warning and Critical level for your environment. \n\nNote that Grafana alerts need to be separately configured.",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 28,
+      "options": {
+        "fieldOptions": {
+          "calcs": [
+            "mean"
+          ],
+          "defaults": {
+            "decimals": 1,
+            "mappings": [],
+            "max": 50,
+            "min": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "semi-dark-orange",
+                  "value": 35
+                },
+                {
+                  "color": "semi-dark-red",
+                  "value": 40
+                }
+              ]
+            },
+            "title": "",
+            "unit": "celsius"
+          },
+          "overrides": [],
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "6.7.4",
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "A",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_PCH_system_board__7_1_, 'System Board Temperature')"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "System Board Temperature - $hostname",
+      "type": "gauge"
+    },
+    {
+      "datasource": null,
+      "description": "Different CPUs have different operating temperatures, so gauge thresholds should probably be customized for the CPU with lowest operating temperatures in your environment.\n\nExample: Intel Xeon Gold 6240Y - Max 74C, so we may want to see a warning at 55C and critical at 65C",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 27,
+      "options": {
+        "fieldOptions": {
+          "calcs": [
+            "mean"
+          ],
+          "defaults": {
+            "decimals": 1,
+            "mappings": [],
+            "max": 90,
+            "min": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "semi-dark-orange",
+                  "value": 50
+                },
+                {
+                  "color": "semi-dark-red",
+                  "value": 60
+                }
+              ]
+            },
+            "title": "",
+            "unit": "celsius"
+          },
+          "overrides": [],
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "6.7.4",
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "A",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_CPU0_invalid__65_1_, 'CPU0')"
+        },
+        {
+          "refCount": 0,
+          "refId": "B",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_CPU1_invalid__65_1_, 'CPU1')"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "CPU Temperature - $hostname",
+      "type": "gauge"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorPrefix": false,
+      "colorValue": true,
+      "colors": [
+        "#299c46",
+        "rgba(237, 129, 40, 0.89)",
+        "#d44a3a"
+      ],
+      "datasource": null,
+      "decimals": 1,
+      "description": "",
+      "format": "volt",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 4
+      },
+      "id": 24,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "$$hashKey": "object:6424",
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "$$hashKey": "object:6425",
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "pluginVersion": "6.7.4",
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": true,
+        "ymax": null,
+        "ymin": 10
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "hide": false,
+          "refCount": 0,
+          "refId": "B",
+          "target": "aliasByNode(netapp.hci.compute.h615.$hostname.ipmi.voltage-Volt_P12V_system_board__7_1_, 3)",
+          "textEditor": false
+        }
+      ],
+      "thresholds": "",
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "System Board Voltage",
+      "type": "singlestat",
+      "valueFontSize": "150%",
+      "valueMaps": [
+        {
+          "$$hashKey": "object:6427",
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "current"
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "description": "This panel serves to help you spot temperature trends in over days or weeks.",
+      "fill": 0,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "hiddenSeries": false,
+      "id": 30,
+      "legend": {
+        "alignAsTable": false,
+        "avg": false,
+        "current": false,
+        "max": true,
+        "min": false,
+        "rightSide": true,
+        "show": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "dataLinks": []
+      },
+      "percentage": false,
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "A",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_Inlet_processor__3_0_, 'Inlet Processor')"
+        },
+        {
+          "refCount": 0,
+          "refId": "B",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_Outlet_system_board__7_1_, 'Outlet System Board')"
+        },
+        {
+          "refCount": 0,
+          "refId": "C",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_CPU0_invalid__65_1_, 'CPU0')"
+        },
+        {
+          "refCount": 0,
+          "refId": "D",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_CPU1_invalid__65_1_, 'CPU1')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "E",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_GPU1_system_board__7_0_, 'GPU1')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "F",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_GPU2_system_board__7_0_, 'GPU2')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "G",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_GPU3_system_board__7_0_, 'GPU3')",
+          "textEditor": false
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Temperature Indicators - $hostname",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:9067",
+          "decimals": null,
+          "format": "celsius",
+          "label": null,
+          "logBase": 1,
+          "max": "90",
+          "min": "20",
+          "show": true
+        },
+        {
+          "$$hashKey": "object:9068",
+          "decimals": null,
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": "0",
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "decimals": 0,
+      "description": "Average fan speeds are expected to be consistent if system workload and environment temperature remain stable.\n\nIf BIOS settings that impact Power Consumption are changed, Fan Speeds are likely to change as well.",
+      "fill": 6,
+      "fillGradient": 6,
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "hiddenSeries": false,
+      "id": 31,
+      "legend": {
+        "alignAsTable": false,
+        "avg": false,
+        "current": false,
+        "max": true,
+        "min": true,
+        "rightSide": false,
+        "show": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "dataLinks": []
+      },
+      "percentage": false,
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "A",
+          "target": "alias(consolidateBy(netapp.hci.compute.h615.$hostname.ipmi.fanspeed-Fan_SYS1_1_system_board__7_0_, 'average'), 'Avg Fan RPM')"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Fan Speeds - $hostname",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:9177",
+          "decimals": 0,
+          "format": "rpm",
+          "label": "",
+          "logBase": 1,
+          "max": null,
+          "min": "0",
+          "show": true
+        },
+        {
+          "$$hashKey": "object:9178",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "cacheTimeout": "",
+      "datasource": null,
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 20,
+      "maxPerRow": 12,
+      "options": {
+        "fieldOptions": {
+          "calcs": [
+            "mean"
+          ],
+          "defaults": {
+            "decimals": 0,
+            "mappings": [],
+            "max": 22000,
+            "min": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "semi-dark-green",
+                  "value": null
+                },
+                {
+                  "color": "light-orange",
+                  "value": 15000
+                },
+                {
+                  "color": "semi-dark-red",
+                  "value": 18000
+                }
+              ]
+            },
+            "unit": "rpm"
+          },
+          "overrides": [],
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": false
+      },
+      "pluginVersion": "6.7.4",
+      "repeat": null,
+      "repeatDirection": "h",
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "A",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.*Fan_SYS0_0*, 'Fan1')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "B",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.*Fan_SYS1_0*, 'Fan2')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "C",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.*Fan_SYS2_0*, 'Fan3')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "D",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.*Fan_SYS3_0*, 'Fan4')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "E",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.*Fan_SYS4_0*, 'Fan5')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "F",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.*Fan_SYS5_0*, 'Fan6')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "G",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.*Fan_SYS6_0*, 'Fan7')",
+          "textEditor": false
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Chassis Fan Speed",
+      "type": "gauge"
+    },
+    {
+      "cacheTimeout": "",
+      "datasource": null,
+      "description": "Power Consumption does not have \"critical level\" per se, as PSU on the H615C are redundant so should one PSU fail, the other can consume \"twice as much\" power.\n\nHowever, users who care about energy consumption may want to examine system activity in the case it regularly consumes more power than expected.",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "id": 23,
+      "options": {
+        "fieldOptions": {
+          "calcs": [
+            "mean"
+          ],
+          "defaults": {
+            "decimals": 0,
+            "mappings": [],
+            "max": 1100,
+            "min": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "light-orange",
+                  "value": 500
+                },
+                {
+                  "color": "light-red",
+                  "value": 750
+                }
+              ]
+            },
+            "unit": "watt"
+          },
+          "overrides": [],
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "6.7.4",
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "A",
+          "target": "alias(netapp.hci.compute.h615.h615t4.ipmi.power-PSU0_Input_power_supply__10_1_, 'PSU1')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "B",
+          "target": "alias(netapp.hci.compute.h615.h615t4.ipmi.power-PSU1_Input_power_supply__10_1_, 'PSU2')",
+          "textEditor": false
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Power Consumption - $hostname",
+      "type": "gauge"
+    },
+    {
+      "datasource": null,
+      "description": "If you don't have a H615C-A4321 in your environment, you may delete this panel. \n\nMaximum NVIDIA Tesla T4 operating temperature is 86C. \n\nNote that Grafana alerts need to be separately configured.",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "id": 22,
+      "options": {
+        "fieldOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "defaults": {
+            "decimals": 1,
+            "mappings": [],
+            "max": 90,
+            "min": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "semi-dark-orange",
+                  "value": 70
+                },
+                {
+                  "color": "semi-dark-red",
+                  "value": 80
+                }
+              ]
+            },
+            "title": "",
+            "unit": "celsius"
+          },
+          "overrides": [],
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "6.7.4",
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "A",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_GPU1_system_board__7_0_, 'GPU0')"
+        },
+        {
+          "refCount": 0,
+          "refId": "B",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_GPU2_system_board__7_0_, 'GPU1')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "C",
+          "target": "alias(netapp.hci.compute.h615.$hostname.ipmi.temperature-Temp_GPU2_system_board__7_0_, 'GPU2')",
+          "textEditor": false
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "GPU Temperature",
+      "type": "gauge"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 22,
+  "style": "dark",
+  "tags": [
+    "NetApp HCI",
+    "Compute",
+    "IPMI"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": null,
+        "current": {
+          "tags": [],
+          "text": "h400",
+          "value": "h400"
+        },
+        "datasource": "graphite",
+        "definition": "netapp.hci.compute.*",
+        "hide": 0,
+        "includeAll": false,
+        "index": -1,
+        "label": "NetApp HCI System Series",
+        "multi": false,
+        "name": "platform",
+        "options": [
+          {
+            "$$hashKey": "object:6347",
+            "selected": true,
+            "text": "h400",
+            "value": "h400"
+          },
+          {
+            "$$hashKey": "object:6348",
+            "selected": false,
+            "text": "h410c22",
+            "value": "h410c22"
+          },
+          {
+            "$$hashKey": "object:6349",
+            "selected": false,
+            "text": "h600",
+            "value": "h600"
+          },
+          {
+            "$$hashKey": "object:6350",
+            "selected": false,
+            "text": "h615",
+            "value": "h615"
+          }
+        ],
+        "query": "netapp.hci.compute.*",
+        "refresh": 0,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": null,
+        "current": {
+          "tags": [],
+          "text": "h615t4",
+          "value": "h615t4"
+        },
+        "datasource": "graphite",
+        "definition": "netapp.hci.compute.h615.*",
+        "hide": 0,
+        "includeAll": false,
+        "index": -1,
+        "label": "NetApp HCI System System",
+        "multi": false,
+        "name": "hostname",
+        "options": [
+          {
+            "$$hashKey": "object:6397",
+            "selected": true,
+            "text": "h615t4",
+            "value": "h615t4"
+          },
+          {
+            "$$hashKey": "object:6398",
+            "selected": false,
+            "text": "h615t4bmc",
+            "value": "h615t4bmc"
+          },
+          {
+            "$$hashKey": "object:6399",
+            "selected": false,
+            "text": "ubuntu",
+            "value": "ubuntu"
+          }
+        ],
+        "query": "netapp.hci.compute.h615.*",
+        "refresh": 0,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "now": true,
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "2d",
+      "7d",
+      "30d"
+    ]
+  },
+  "timezone": "browser",
+  "title": "NetApp HCI - H615C Server Systems",
+  "uid": "8xpgKJiGz",
+  "variables": {
+    "list": []
+  },
+  "version": 16
+}

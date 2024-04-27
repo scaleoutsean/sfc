@@ -1,0 +1,668 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "$$hashKey": "object:8757",
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Hardware Metrics for NetApp H-Series 410C, 300E, 500E, 700E (IPMI)",
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": 13,
+  "iteration": 1591862303003,
+  "links": [],
+  "panels": [
+    {
+      "bgColor": "#3274D9",
+      "cacheTimeout": null,
+      "clockType": "24 hour",
+      "countdownSettings": {
+        "customFormat": null,
+        "endCountdownTime": "2020-06-11T12:06:00.000Z",
+        "endText": "00:00:00"
+      },
+      "datasource": null,
+      "dateSettings": {
+        "dateFormat": "YYYY-MM-DD",
+        "fontSize": "20px",
+        "fontWeight": "normal",
+        "showDate": false
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 0
+      },
+      "id": 7,
+      "links": [],
+      "mode": "time",
+      "refreshSettings": {
+        "syncWithDashboard": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "target": ""
+        }
+      ],
+      "timeFrom": null,
+      "timeSettings": {
+        "customFormat": "HH:mm:ss",
+        "fontSize": "50px",
+        "fontWeight": "normal"
+      },
+      "timeShift": null,
+      "timezone": null,
+      "timezoneSettings": {
+        "fontSize": "12px",
+        "fontWeight": "normal",
+        "showTimezone": false,
+        "zoneFormat": "offsetAbbv"
+      },
+      "title": "Time",
+      "type": "grafana-clock-panel"
+    },
+    {
+      "datasource": null,
+      "description": "Different CPUs have different operating temperatures, so gauge thresholds should probably be customized for the CPU with lowest operating temperatures in your environment.\n\nExample: Intel Xeon Gold 6240Y - Max 74C, so we may want to set orange (warning) at 55C and red (critical) at 65C\n\nNote that Grafana alerts need to be separately configured.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 5,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "fieldOptions": {
+          "calcs": [
+            "mean"
+          ],
+          "defaults": {
+            "decimals": 1,
+            "mappings": [],
+            "max": 100,
+            "min": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "#EAB839",
+                  "value": 50
+                },
+                {
+                  "color": "semi-dark-red",
+                  "value": 60
+                }
+              ]
+            }
+          },
+          "overrides": [],
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "6.7.4",
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "A",
+          "target": "alias(netapp.hci.compute.$platform.$hostname.ipmi.temperature-CPU1_Temp_processor__3_1_, 'CPU0 Temperature')",
+          "textEditor": true
+        },
+        {
+          "refCount": 0,
+          "refId": "B",
+          "target": "alias(netapp.hci.compute.$platform.$hostname.ipmi.temperature-CPU2_Temp_processor__3_2_, 'CPU1 Temperature')",
+          "textEditor": false
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "CPU Temperature - $hostname",
+      "type": "gauge"
+    },
+    {
+      "datasource": null,
+      "description": "Different systems have different operating ranges and different data centers run at different temperatures. Feel free to examine the details of sensor that's measured and adjust Warning and Critical level for your environment. \n\nNote that Grafana alerts need to be separately configured.",
+      "gridPos": {
+        "h": 8,
+        "w": 7,
+        "x": 17,
+        "y": 0
+      },
+      "id": 8,
+      "options": {
+        "fieldOptions": {
+          "calcs": [
+            "mean"
+          ],
+          "defaults": {
+            "decimals": 1,
+            "mappings": [],
+            "max": 60,
+            "min": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "#EAB839",
+                  "value": 35
+                },
+                {
+                  "color": "semi-dark-red",
+                  "value": 40
+                }
+              ]
+            },
+            "unit": "celsius"
+          },
+          "overrides": [],
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "6.7.4",
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "B",
+          "target": "alias(netapp.hci.compute.$platform.$hostname.ipmi.temperature-System_Temp_system_board__7_2_, 'Mainboard Temperature')",
+          "textEditor": false
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "System Board Temperature - $hostname",
+      "type": "gauge"
+    },
+    {
+      "datasource": null,
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 4
+      },
+      "id": 4,
+      "options": {
+        "fieldOptions": {
+          "calcs": [
+            "mean"
+          ],
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": [],
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "6.7.4",
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "A",
+          "target": "alias(netapp.hci.compute.$platform.$hostname.ipmi.power-PW_Consumption_power_management_board__21_0_, 'BMC Power Consumption')",
+          "textEditor": false
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "BMC Power Consumption - $hostname",
+      "type": "gauge"
+    },
+    {
+      "datasource": null,
+      "description": "Several H400 Systems (up to 4) may share the same H400 chassis, so chassis fan metrics aren't host-specific\n\nThis also applies to chassis hosting H-Series 300E, 500E, 700E compute nodes (which may be intermixed between them and also with H410C and even H401S nodes)",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {
+        "displayMode": "basic",
+        "fieldOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "defaults": {
+            "decimals": 0,
+            "mappings": [],
+            "max": 22000,
+            "min": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "#EAB839",
+                  "value": 11000
+                },
+                {
+                  "color": "red",
+                  "value": 12000
+                }
+              ]
+            },
+            "unit": "rpm"
+          },
+          "overrides": [],
+          "values": false
+        },
+        "orientation": "auto",
+        "showUnfilled": true
+      },
+      "pluginVersion": "6.7.4",
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "A",
+          "target": "alias(netapp.hci.compute.$platform.$hostname.ipmi.fanspeed-FAN1_fan_cooling__29_1_, 'FAN1')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "B",
+          "target": "alias(netapp.hci.compute.$platform.$hostname.ipmi.fanspeed-FAN2_fan_cooling__29_2_, 'FAN2')",
+          "textEditor": false
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Chassis Fan Speed",
+      "type": "bargauge"
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "decimals": 0,
+      "description": "This panel serves to help you spot temperature trends in over days or weeks.",
+      "fill": 0,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "hiddenSeries": false,
+      "id": 5,
+      "legend": {
+        "alignAsTable": false,
+        "avg": false,
+        "current": true,
+        "max": true,
+        "min": true,
+        "show": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "dataLinks": []
+      },
+      "percentage": false,
+      "pluginVersion": "6.7.4",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "A",
+          "target": "alias(netapp.hci.compute.$platform.$hostname.ipmi.temperature-CPU1_Temp_processor__3_1_, 'CPU0 Temp')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "B",
+          "target": "alias(netapp.hci.compute.$platform.$hostname.ipmi.temperature-CPU2_Temp_processor__3_2_, 'CPU1 Temp')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "C",
+          "target": "alias(netapp.hci.compute.$platform.$hostname.ipmi.temperature-AOC_NIC_Temp____system_board__7_1_, 'NIC Temp')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "D",
+          "target": "alias(netapp.hci.compute.$platform.$hostname.ipmi.temperature-Inlet_Temp_system_board__7_3_, 'Inlet Temp')",
+          "textEditor": false
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Temperature Indicators - $hostname",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:10044",
+          "decimals": 1,
+          "format": "short",
+          "label": "",
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:10045",
+          "decimals": 1,
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "description": "Single chassis may be shared among up to 4 compute and/or storage nodes from Gen 1 (H300/H500/H700) and Gen 2 (H410) H-Series systems",
+      "fill": 0,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "hiddenSeries": false,
+      "id": 9,
+      "legend": {
+        "alignAsTable": true,
+        "avg": false,
+        "current": true,
+        "max": true,
+        "min": true,
+        "show": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "dataLinks": []
+      },
+      "percentage": false,
+      "pluginVersion": "6.7.4",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "refCount": 0,
+          "refId": "A",
+          "target": "alias(netapp.hci.compute.$platform.$hostname.ipmi.fanspeed-FAN1_fan_cooling__29_1_, 'Fan1 Speed')",
+          "textEditor": false
+        },
+        {
+          "refCount": 0,
+          "refId": "B",
+          "target": "alias(netapp.hci.compute.$platform.$hostname.ipmi.fanspeed-FAN2_fan_cooling__29_2_, 'Fan2 Speed')",
+          "textEditor": false
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Chassis Fan Speed",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:10044",
+          "decimals": 0,
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": "20000",
+          "min": "0",
+          "show": true
+        },
+        {
+          "$$hashKey": "object:10045",
+          "decimals": 0,
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 22,
+  "style": "dark",
+  "tags": [
+    "NetApp HCI",
+    "Compute",
+    "IPMI"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": null,
+        "current": {
+          "isNone": true,
+          "selected": false,
+          "tags": [],
+          "text": "h400",
+          "value": "h400"
+        },
+        "datasource": "graphite",
+        "definition": "netapp.hci.compute.*",
+        "hide": 0,
+        "includeAll": false,
+        "index": -1,
+        "label": "NetApp HCI Compute Platform",
+        "multi": false,
+        "name": "platform",
+        "options": [
+          {
+            "$$hashKey": "object:2093",
+            "selected": true,
+            "text": "h400",
+            "value": "h400"
+          },
+          {
+            "$$hashKey": "object:2094",
+            "selected": false,
+            "text": "h410c22",
+            "value": "h410c22"
+          }
+        ],
+        "query": "netapp.hci.compute.*",
+        "refresh": 0,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": null,
+        "current": {
+          "tags": [],
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": "graphite",
+        "definition": "netapp.hci.compute.$platform.*",
+        "hide": 0,
+        "includeAll": true,
+        "index": -1,
+        "label": "NetApp HCI Compute Host",
+        "multi": true,
+        "name": "hostname",
+        "options": [
+          {
+            "$$hashKey": "object:14557",
+            "selected": true,
+            "text": "All",
+            "value": "$__all"
+          },
+          {
+            "$$hashKey": "object:14558",
+            "selected": false,
+            "text": "h410c21",
+            "value": "h410c21"
+          },
+          {
+            "$$hashKey": "object:14559",
+            "selected": false,
+            "text": "h410c22",
+            "value": "h410c22"
+          },
+          {
+            "$$hashKey": "object:14560",
+            "selected": false,
+            "text": "h615t4",
+            "value": "h615t4"
+          },
+          {
+            "$$hashKey": "object:14561",
+            "selected": false,
+            "text": "h615t4bmc",
+            "value": "h615t4bmc"
+          }
+        ],
+        "query": "netapp.hci.compute.$platform.*",
+        "refresh": 0,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ]
+  },
+  "timezone": "",
+  "title": "NetApp HCI - H400 Series Chasis and Server Systems",
+  "uid": "BvHeQJmGz",
+  "variables": {
+    "list": []
+  },
+  "version": 14
+}
