@@ -1,6 +1,7 @@
 # Change Log
 
 - [Change Log](#change-log)
+  - [Changes in v2.0.0](#changes-in-v200)
   - [Changes in v0.7.1](#changes-in-v071)
   - [Changes in v0.7](#changes-in-v07)
   - [Changes in v0.6.1](#changes-in-v061)
@@ -10,6 +11,15 @@
   - [Changes in .3](#changes-in-3)
   - [Changes in .v2](#changes-in-v2)
   - [Changes in .v1](#changes-in-v1)
+
+## Changes in v2.0.0
+
+- SolidFire Collector (technically v1.0.x in HCI Collector 0.7.x) rewritten without SolidFire Python SDK
+- Database back-end change from Graphite to InfluxDB OSS v1, and smaller disk space requirements
+- Scheduling and performance improvements with non-time-critical metrics collected at lower frequencies. SFC should be able to easily large SolidFire clusters
+- VMware collector removed according to the plan (see [here](https://github.com/scaleoutsean/sfc/blob/v0.7.2/docs/FAQ.md#whats-the-roadmap-kenneth)). HCI Compute users can deploy the same or other vSphere collector on their own. The old how-to for IPMI data collection from NetApp HCI nodes is retained and archived in the docs folder of this repository
+- Grafana configuration and dashboards also not included, but extensive reference InfluxQL queries and a dashboard created with Grafana 11 are included
+- No major changes in collected data, but SFC may not include some minor measurement details that HCI Collector v0.7.1 collects, and may contain some new ones. If something essential is missing, feedback through Issues is welcome
 
 ## Changes in v0.7.1
 
