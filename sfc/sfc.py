@@ -171,9 +171,9 @@ async def volume_performance(session, **kwargs):
     function_name = 'volume_performance'  # no names
 
     fields = [('actualIOPS', 'actual_iops'), ('averageIOPSize', 'average_io_size'), ('burstIOPSCredit', 'burst_io_credit'), ('clientQueueDepth', 'client_queue_depth'), ('latencyUSec', 'latency_usec'), ('nonZeroBlocks', 'non_zero_blocks'),
-              ('normalizedIOPS', 'normalized_iops'), ('readBytesLastSample', 'read_bytes_last_sample'), ('readLatencyUSec',
-                                                                                                         'read_latency_usec'), ('readOpsLastSample', 'read_ops_last_sample'), ('throttle', 'throttle'), ('volumeSize', 'volume_size'),
-              ('volumeUtilization', 'volume_utilization'), ('writeBytesLastSample', 'write_bytes_last_sample'), ('writeLatencyUSec', 'write_latency_usec'), ('writeOpsLastSample', 'write_ops_last_sample'), ('zeroBlocks', 'zero_blocks')]
+              ('normalizedIOPS', 'normalized_iops'), ('readBytes', 'read_bytes'), ('readBytesLastSample', 'read_bytes_last_sample'), ('readLatencyUSec',
+                                                                                                                                      'read_latency_usec'), ('readOpsLastSample', 'read_ops_last_sample'), ('throttle', 'throttle'), ('volumeSize', 'volume_size'),
+              ('volumeUtilization', 'volume_utilization'), ('writeBytes', 'write_bytes'), ('writeBytesLastSample', 'write_bytes_last_sample'), ('writeLatencyUSec', 'write_latency_usec'), ('writeOpsLastSample', 'write_ops_last_sample'), ('zeroBlocks', 'zero_blocks')]
     if len(all_volumes) > CHUNK_SIZE:
         logging.info('Splitting volumes list with length ' +
                      str(len(all_volumes)) + ' using chunk size ' + str(CHUNK_SIZE) + '.')
