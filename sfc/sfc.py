@@ -1019,7 +1019,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         prog="sfc.py",
         description="Collects SolidFire metrics and sends them to InfluxDB.",
-        epilog="Author: @scaleoutSean\nhttps://github.com/scaleoutsean/sfc\nLicense: the BSD License 3.0"
+        epilog="Author: @scaleoutSean\nhttps://github.com/scaleoutsean/sfc\nLicense: the Apache License 2.0"
     )
     parser.add_argument('-m', '--mvip', nargs='?', const=1, type=str, default=SF_MVIP, required=False,
                         help='MVIP or FQDN of SolidFire cluster from which metrics should be collected. Default: ' + SF_MVIP)
