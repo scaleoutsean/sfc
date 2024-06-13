@@ -19,7 +19,8 @@
 - Scheduling and performance improvements with non-time-critical metrics collected at lower frequencies. SFC should be able to easily large SolidFire clusters
 - VMware collector removed according to the plan (see [here](https://github.com/scaleoutsean/sfc/blob/v0.7.2/docs/FAQ.md#whats-the-roadmap-kenneth)). HCI Compute users can deploy the same or other vSphere collector on their own. The old how-to for IPMI data collection from NetApp HCI nodes is retained and archived in the docs folder of this repository
 - Grafana configuration and dashboards also not included, but extensive reference InfluxQL queries and a dashboard created with Grafana 11 are included
-- No major changes in collected data, but SFC may not include some minor measurement details that HCI Collector v0.7.1 collects, and may contain some new ones. If something essential is missing, feedback through Issues is welcome
+- No major changes in collected data, but SFC may not include some minor measurement details that HCI Collector v0.7.1 collects, and may contain some new ones. If something essential is missing, feedback through Issues is welcome.
+  - New: basic volume pairing (replication) status and mode monitoring
 
 ## Changes in v0.7.1
 

@@ -395,6 +395,33 @@ This can be useful if you want to enforce the use of QoS Policy IDs - which is p
 
 Another use case is in multi-cluster scenarios where you may want to apply settings to a volume replica.
 
+Basic volume pairing information is collected as well. By basic I mean that only the first pairing is analyzed, and not all details are included to avoid problems with parsing and typing. Most users don't have more than one pairing per volume and three clusters would be required to try and test, so the number of monitored relationships (which is one) per volume is unlikely to grow.
+
+Field/tag assignment may change if necessary, but at least initially this is one example of how to use it.
+
+```sql
+SELECT last("remote_replication_mode") FROM "volumes" 
+  WHERE $timeFilter 
+  GROUP BY time($__interval), "name"::tag fill(null)
+```
+
+![Volumes - by replication mode](../images/sfc-example-dashboard-13-volume-properties-replication-mode.png)
+
+Volume replication *progress* isn't available in volume properties or other SolidFire API (that I know of), but it may be possible to watch writeBytes on replication *target* to see if it's incrementing and from that derive replication throughput on that relationship.
+
+This hasn't been tested, but it's included in the reference dashboard. The assumption is volume ID 162 has access set to replicationTarget, i.e. the only writes are coming from replication "workload".
+
+```sql
+SELECT derivative(sum("write_bytes"), 60s) FROM "volume_performance" 
+  WHERE ("id"::tag = '162') AND $timeFilter 
+  GROUP BY time($interval), "id"::tag
+```
+
+I don't know if replication writes register in writeBytes. If they do, that should work fine for people with static volume pairings where adding a bunch of IDs to a panel is one-time effort. 
+
+Unfortunately `write_bytes` comes from the volume *performance* method (and is therefore in `volume_performance` measurement), while `access` (readWrite, replicationTarget) is in a volume property (and hence in the `volumes` measurement), so there's no instant way to get both at once.
+
+Replication monitoring is new in SFC v2 and based on feedback, these details can be adjusted.
 
 ### Volume performance (`volume_performance`)
 

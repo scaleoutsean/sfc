@@ -46,7 +46,7 @@ INFLUX_PORT = '32290'
 INFLUX_DB = 'sfc'
 SF_MVIP = '192.168.1.30'
 SF_USERNAME = 'monitor'
-SF_PASSWORD = ''
+SF_PASSWORD = 'monitor123'
 
 # ============== this section can be left as-is ===============================
 
@@ -76,20 +76,90 @@ async def volumes(session, **kwargs):
     """
     Extracts useful volume properties including volume name.
 
-    Other SFC functions use this function to get ID-to-name mapping for volumes.
+    Other SFC functions may use this function to get ID-to-name mapping for volumes.
     """
     time_start = round(time.time(), 3)
-    function_name = 'volumes'  # with names
+    function_name = 'volumes'
     # NOTE: the volumeID pair is out of order because it maps to 'id' which
-    # *is* in proper order
-    tags = [('access', 'access'), ('accountID', 'account_id'), ('enable512e', 'enable_512e'), ('volumeID', 'id'),
-            ('name', 'name'), ('scsiNAADeviceID', 'scsi_naa_dev_id'), ('volumeConsistencyGroupUUID', 'vol_cg_group_id')]
-    fields = [('blockSize', 'block_size'), ('fifoSize', 'fifo_size'), ('minFifoSize',
-                                                                       'min_fifo_size'), ('qosPolicyID', 'qos_policy_id'), ('totalSize', 'total_size')]
-    for t in tags:
-        if t[0] in (t[0] for t in fields) or [tag[0] for tag in tags if tags.count(
-                tag) > 1] or [field[0] for field in fields if fields.count(field) > 1]:
-            logging.critical("Duplicate metrics found: " + t[0])
+    # *is* in proper order. We have two sets of tags depending if the volume is
+    # paired
+    tags_non_paired = [
+        ('access',
+         'access'),
+        ('accountID',
+         'account_id'),
+        ('enable512e',
+         'enable_512e'),
+        ('volumeID',
+         'id'),
+        ('name',
+         'name'),
+        ('scsiNAADeviceID',
+         'scsi_naa_dev_id'),
+        ('volumeConsistencyGroupUUID',
+         'vol_cg_group_id')]
+    fields_non_paired = [
+        ('blockSize',
+         'block_size'),
+        ('fifoSize',
+         'fifo_size'),
+        ('minFifoSize',
+         'min_fifo_size'),
+        ('qosPolicyID',
+         'qos_policy_id'),
+        ('totalSize',
+         'total_size')]
+    tags_paired = [
+        ('access',
+         'access'),
+        ('accountID',
+         'account_id'),
+        ('clusterPairID',
+         'cluster_pair_id'),
+        ('enable512e',
+         'enable_512e'),
+        ('volumeID',
+         'id'),
+        ('name',
+         'name'),
+        ('remoteVolumeID',
+         'remote_volume_id'),
+        ('remoteVolumeName',
+         'remote_volume_name'),
+        ('remote_replication_state',
+         'remote_replication_state'),
+        ('scsiNAADeviceID',
+         'scsi_naa_dev_id'),
+        ('volumeConsistencyGroupUUID',
+         'vol_cg_group_id'),
+        ('volumePairUUID',
+         'volume_pair_uuid')]
+    fields_paired = [
+        ('blockSize',
+         'block_size'),
+        ('fifoSize',
+         'fifo_size'),
+        ('minFifoSize',
+         'min_fifo_size'),
+        ('qosPolicyID',
+         'qos_policy_id'),
+        ('remote_replication_mode',
+         'remote_replication_mode'),
+        ('totalSize',
+         'total_size')]
+    for t in tags_non_paired:
+        if t[0] in (t[0] for t in fields_non_paired) or [tag[0] for tag in tags_non_paired if tags_non_paired.count(
+                tag) > 1] or [field[0] for field in fields_non_paired if fields_non_paired.count(field) > 1]:
+            logging.critical(
+                "Duplicate metrics found in non-paired volume measurements (tags and fields): " +
+                t[0])
+            exit(200)
+    for t in tags_paired:
+        if t[0] in (t[0] for t in fields_paired) or [tag[0] for tag in tags_paired if tags_paired.count(
+                tag) > 1] or [field[0] for field in fields_paired if fields_paired.count(field) > 1]:
+            logging.critical(
+                "Duplicate metrics found in paired volume measurements (tags and fields): " +
+                t[0])
             exit(200)
     api_payload = "{ \"method\": \"ListVolumes\", \"params\": {\"volumeStatus\": \"active\"} }"
     try:
@@ -104,10 +174,56 @@ async def volumes(session, **kwargs):
     if not kwargs:
         volumes = ''
         for volume in result:
-            # NOTE: this needs to be int in InfluxDB
+            single_volume = "volumes,cluster=" + CLUSTER_NAME + ","
+            # NOTE: this needs to be an integer in InfluxDB, None won't work
             if (volume['qosPolicyID'] is None):
                 volume['qosPolicyID'] = 0
-            single_volume = "volumes,cluster=" + CLUSTER_NAME + ","
+            # NOTE: this section gathers volume pairing information when
+            # volumePairs is not empty
+            volume_paired = False
+            if volume['volumePairs'] != []:
+                volume_pairs = volume['volumePairs']
+                logging.debug(
+                    "Volume pairs (volume['volumePairs']) for volume ID: " + str(
+                        volume['volumeID']) + ": " + str(volume_pairs))
+                logging.debug('Volume replication enabled for volume ' +
+                              str(volume['volumeID']) +
+                              '. Calling extract_volume_pair().')
+                vp = await extract_volume_pair(volume_pairs)
+                logging.debug(
+                    'VP returned from extract_volume_pair: ' + str(vp))
+                if vp != {}:
+                    try:
+                        for k in vp:
+                            volume[k] = vp[k]
+                        vp = {}
+                        volume_paired = True
+                        logging.debug(
+                            'Volume pair information obtained, extracted and added to volume ' + str(
+                                volume['volumeID']) + '.')
+                    except BaseException:
+                        logging.error(
+                            'Volume pair information not obtained for volume could not be added to ' + str(
+                                volume['volumeID']) + ' key.')
+                else:
+                    logging.error('Volume pair information not returned for volume ' +
+                                  str(volume['volumeID']) + ' by extract_volume_pair().')
+            else:
+                logging.debug(
+                    'Volume replication not enabled for volume ' + str(volume['volumeID']) + '.')
+
+            if volume_paired == True:
+                tags = tags_paired
+                fields = fields_paired
+                logging.debug('Volume ' +
+                              str(volume['volumeID']) +
+                              ' is paired, using paired tags and fields.')
+            else:
+                tags = tags_non_paired
+                fields = fields_non_paired
+                logging.debug('Volume ' +
+                              str(volume['volumeID']) +
+                              ' is not paired, using non-paired tags and fields.')
             for tag in tags:
                 k = tag[0]
                 nk = tag[1]
@@ -117,6 +233,9 @@ async def volumes(session, **kwargs):
                     single_volume = single_volume + kv + ","
                 else:
                     single_volume = single_volume + kv + " "
+                if volume_paired == True:
+                    logging.debug("single_volume tags for volume + " +
+                                  str(volume['volumeID']) + ": " + str(single_volume))
             for field in fields:
                 k = field[0]
                 nk = field[1]
@@ -127,7 +246,13 @@ async def volumes(session, **kwargs):
                     single_volume = single_volume + kv + ","
                 else:
                     single_volume = single_volume + kv + " "
+                if volume_paired == True:
+                    logging.debug("single_volume tags for volume + " +
+                                  str(volume['volumeID']) + ": " + str(single_volume))
             volumes = volumes + single_volume + "\n"
+            if volume_paired == True:
+                logging.debug("volumes payload for " +
+                              str(volume['volumeID']) + ": " + str(volumes))
         await send_to_influx(volumes)
     elif kwargs.keys() == {'names'} or kwargs.keys() == {'names_dict'}:
         for key in kwargs:
@@ -149,6 +274,60 @@ async def volumes(session, **kwargs):
     logging.info('Volumes collected in ' + str(time_taken) + ' seconds.')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     return volumes
+
+
+async def extract_volume_pair(volume_pairs: list) -> dict:
+    """
+    Extract information for first volume pairing from volume replication list and return a dict with contents.
+
+    This is a helper function for the volumes() function.
+    Currently only the first paired volume is processed. Additional volumes and values may be added in the future.
+    """
+    time_start = round(time.time(), 3)
+    function_name = 'volume_replication'  # with names
+    vp = {}
+    if volume_pairs == [] or len(volume_pairs) > 1:
+        logging.debug('volume_pairs list ' + str(volume_pairs) + '.')
+        logging.warning(
+            'Volume pairs list is empty or has more than one pair, which is currently not implemented. Returning.')
+        return {}
+    else:
+        vp_dict = volume_pairs[0]
+        for k in vp_dict:
+            try:
+                # pop from k['clusterPairID']
+                if k == 'clusterPairID':
+                    vp['clusterPairID'] = vp_dict[k]
+                if k == 'remoteVolumeID':
+                    vp['remoteVolumeID'] = vp_dict[k]
+                if k == 'remoteVolumeName':
+                    vp['remoteVolumeName'] = vp_dict[k]
+                if k == 'volumePairUUID':
+                    vp['volumePairUUID'] = vp_dict[k]
+            except KeyError as e:
+                logging.warning('KeyError in volume_pair list: ' + str(e))
+                return {}
+        try:
+            mode_mapping = [('Async', 1), ('Sync', 2), ('SnapshotsOnly', 3)]
+            # NOTE: this order (Async/Sync/SnapshotsOnly) is based on the SolidFire UI.
+            # Numbering starts from 1 as 0 seems suitable for non-paired
+            # volumes
+            vp['remote_replication_mode'] = [
+                x[1] for x in mode_mapping if x[0] == vp_dict['remoteReplication']['mode']][0]
+            vp['remote_replication_state'] = vp_dict['remoteReplication']['state']
+        except KeyError as e:
+            logging.warning(
+                'KeyError while parsing remoteReplication: ' + str(e))
+            return {}
+    time_taken = (round(time.time(), 3) - time_start)
+    if args.loglevel == 'DEBUG':
+        logging.debug('Volume pair payload: ' + str(vp) + '.')
+    logging.info(
+        'Volume pair data extracted in ' +
+        str(time_taken) +
+        ' seconds.')
+    await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
+    return vp
 
 
 async def volume_performance(session, **kwargs):
@@ -223,7 +402,7 @@ async def volume_performance(session, **kwargs):
         await send_to_influx(volumes_performance)
     time_taken = (round(time.time(), 3) - time_start)
     if args.loglevel == 'DEBUG':
-        logging.debug("Volume performance payload" + str(volumes_performance))
+        logging.debug("Volume performance payload " + str(volumes_performance))
     logging.info('Volume performance gathered in ' +
                  str(time_taken) + ' seconds')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)

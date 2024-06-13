@@ -468,9 +468,7 @@
       "id": 11,
       "options": {
         "legend": {
-          "calcs": [
-            "last"
-          ],
+          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -483,6 +481,7 @@
       },
       "targets": [
         {
+          "alias": "recent IO size",
           "datasource": {
             "type": "influxdb",
             "uid": "${DS_SFC}"
@@ -609,6 +608,7 @@
       },
       "targets": [
         {
+          "alias": "normalized IOPS",
           "datasource": {
             "type": "influxdb",
             "uid": "${DS_SFC}"
@@ -733,6 +733,7 @@
       },
       "targets": [
         {
+          "alias": "CPU utilization",
           "datasource": {
             "type": "influxdb",
             "uid": "${DS_SFC}"
@@ -743,6 +744,12 @@
                 "$__interval"
               ],
               "type": "time"
+            },
+            {
+              "params": [
+                "id::tag"
+              ],
+              "type": "tag"
             },
             {
               "params": [
@@ -1016,6 +1023,7 @@
         "type": "influxdb",
         "uid": "${DS_SFC}"
       },
+      "description": "Compression x Deduplication",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -1117,7 +1125,7 @@
           "tags": []
         }
       ],
-      "title": "Volume efficiency",
+      "title": "Volume efficiency factor",
       "transformations": [
         {
           "id": "renameByRegex",
@@ -1211,6 +1219,7 @@
       },
       "targets": [
         {
+          "alias": "time",
           "datasource": {
             "type": "influxdb",
             "uid": "${DS_SFC}"
@@ -1387,8 +1396,8 @@
         {
           "id": "renameByRegex",
           "options": {
-            "regex": "account_props.mean { name: (.*) }",
-            "renamePattern": "$1"
+            "regex": "accounts.mean { (\\w+): (.*) }",
+            "renamePattern": "$2"
           }
         }
       ],
@@ -2583,6 +2592,294 @@
         "type": "influxdb",
         "uid": "${DS_SFC}"
       },
+      "description": "Panel shows mode of replication for paired SolidFire volumes.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "1": {
+                  "color": "light-red",
+                  "index": 0,
+                  "text": "Async"
+                },
+                "2": {
+                  "color": "dark-red",
+                  "index": 1,
+                  "text": "Sync"
+                },
+                "3": {
+                  "color": "yellow",
+                  "index": 2,
+                  "text": "SnapshotsOnly"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "match": "nan",
+                "result": {
+                  "color": "text",
+                  "index": 3,
+                  "text": "None"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 81
+      },
+      "id": 19,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_SFC}"
+          },
+          "groupBy": [
+            {
+              "params": [
+                "$__interval"
+              ],
+              "type": "time"
+            },
+            {
+              "params": [
+                "name::tag"
+              ],
+              "type": "tag"
+            },
+            {
+              "params": [
+                "null"
+              ],
+              "type": "fill"
+            }
+          ],
+          "measurement": "volumes",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "refId": "A",
+          "resultFormat": "time_series",
+          "select": [
+            [
+              {
+                "params": [
+                  "remote_replication_mode"
+                ],
+                "type": "field"
+              },
+              {
+                "params": [],
+                "type": "last"
+              }
+            ]
+          ],
+          "tags": []
+        }
+      ],
+      "title": "Volume replication",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "volumes.last { name: (.*) }",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_SFC}"
+      },
+      "description": "This panel assumes volume 162 has access set to replicationTarget, and monitors increase in write_bytes to capture (inbound) replication performance. ",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "1": {
+                  "color": "light-red",
+                  "index": 0,
+                  "text": "Async"
+                },
+                "2": {
+                  "color": "dark-red",
+                  "index": 1,
+                  "text": "Sync"
+                },
+                "3": {
+                  "color": "yellow",
+                  "index": 2,
+                  "text": "SnapshotsOnly"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "match": "nan",
+                "result": {
+                  "color": "text",
+                  "index": 3,
+                  "text": "None"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 87
+      },
+      "id": 20,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_SFC}"
+          },
+          "groupBy": [
+            {
+              "params": [
+                "$interval"
+              ],
+              "type": "time"
+            },
+            {
+              "params": [
+                "id::tag"
+              ],
+              "type": "tag"
+            }
+          ],
+          "measurement": "volume_performance",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "query": "SELECT derivative(sum(\"write_bytes\"), 60s) FROM \"volume_performance\" WHERE (\"id\"::tag = '162') AND $timeFilter GROUP BY time($interval), \"id\"::tag",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series",
+          "select": [
+            [
+              {
+                "params": [
+                  "write_bytes"
+                ],
+                "type": "field"
+              },
+              {
+                "params": [],
+                "type": "sum"
+              },
+              {
+                "params": [
+                  "10s"
+                ],
+                "type": "derivative"
+              }
+            ]
+          ],
+          "tags": [
+            {
+              "key": "id::tag",
+              "operator": "=",
+              "value": "162"
+            }
+          ]
+        }
+      ],
+      "title": "Volume replication performance for volume ID 162",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "volumes.last { name: (.*) }",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_SFC}"
+      },
       "description": "",
       "fieldConfig": {
         "defaults": {
@@ -2635,13 +2932,38 @@
           },
           "unit": "s"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "volume_replication"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 81
+        "y": 93
       },
       "id": 17,
       "options": {
@@ -2730,7 +3052,7 @@
     "list": []
   },
   "time": {
-    "from": "now-3h",
+    "from": "now-30m",
     "to": "now"
   },
   "timeRangeUpdatedDuringEditOrView": false,
@@ -2752,6 +3074,6 @@
   "timezone": "browser",
   "title": "SFC example  dashboard",
   "uid": "fdmnkenr6wao0a",
-  "version": 47,
+  "version": 51,
   "weekStart": "monday"
 }
