@@ -405,7 +405,7 @@ SELECT last("remote_replication_mode") FROM "volumes"
   GROUP BY time($__interval), "name"::tag fill(null)
 ```
 
-![Volumes - by replication mode](../images/sfc-example-dashboard-13-volume-properties-replication-mode)
+![Volumes - by replication mode](../images/sfc-example-dashboard-13-volume-properties-replication-mode.png)
 
 Volume replication *progress* isn't available in volume properties or other SolidFire API (that I know of), but it may be possible to watch writeBytes on replication *target* to see if it's incrementing and from that derive replication throughput on that relationship.
 
