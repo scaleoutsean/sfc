@@ -419,7 +419,7 @@ SELECT derivative(sum("write_bytes"), 60s) FROM "volume_performance"
 
 I don't know if replication writes register in writeBytes. If they do, that should work fine for people with static volume pairings where adding a bunch of IDs to a panel is one-time effort. 
 
-Unfortunately `write_bytes` comes from the volume *performance* method (and is therefore in `volume_performance` measurement), while `access` (readWrite, replicationTarget) is in a volume property (and hence in the `volumes` measurement), so there's no instant way to get both at once.
+Unfortunately `write_bytes` comes from the volume *performance* method (and is therefore in `volume_performance` measurement), while `access` (readWrite, replicationTarget) is a volume property (and hence in the `volumes` measurement), so there's no instant way to get both at once.
 
 Replication monitoring is new in SFC v2 and based on feedback, these details can be adjusted.
 

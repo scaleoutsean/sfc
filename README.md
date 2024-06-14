@@ -68,10 +68,16 @@ git clone https://github.com/scaleoutsean/sfc
 cd sfc
 python3 -m pip install -r requirements.txt
 # with InfluxDB OSS v1 at 192.168.50.184:32290, database 'sfc' will be automatically created by SFC
-python3 ./sfc.py --mvip 192.168.1.30 -u monitor -p ******* -ih 192.168.50.184 -ip 32290 -id sfc
+python3 sfc.py --mvip 192.168.1.30 -u monitor -p ******* -ih 192.168.50.184 -ip 32290 -id sfc
 ```
 
-If you want something different, try `-h` or hard-code the vars at the top of the script for a test run and try with just `python3 ./sfc.py` (and nothing else).
+You can also try this, which should load SF_USERNAME and SF_PASSWORD from environment or prompt you to provide them:
+
+```sh
+./sfc.py --mvip 192.168.1.30 -ih 192.168.50.184 -ip 32290 -id sfc
+```
+
+If you want something different, try `-h` or hard-code argument values into script for a test run and try with just `python3 ./sfc.py` (and nothing else).
 
 ```sh
 $ python ./sfc.py -h
@@ -82,11 +88,11 @@ Collects SolidFire metrics and sends them to InfluxDB.
 options:
   -h, --help            show this help message and exit
   -m [MVIP], --mvip [MVIP]
-                        MVIP or FQDN of SolidFire cluster from which metrics should be collected. Default: 192.168.1.30
-  -u [USERNAME], --username [USERNAME]
-                        username for SolidFire array. Default: monitor
-  -p [PASSWORD], --password [PASSWORD]
-                        password for admin account on SolidFire cluster. Default: monitor123
+                        MVIP or FQDN of SolidFire cluster from which metrics should be collected.
+  -u USERNAME, --username USERNAME
+                        username for SolidFire array. Default: SF_USERNAME
+  -p PASSWORD, --password PASSWORD
+                        password for admin account on SolidFire cluster. Default: SF_PASSWORD.
   -ih [INFLUXDB_HOST], --influxdb-host [INFLUXDB_HOST]
                         host IP or name of InfluxDB. Default: 192.168.50.184
   -ip [INFLUXDB_PORT], --influxdb-port [INFLUXDB_PORT]
@@ -105,8 +111,7 @@ options:
   -lf [LOGFILE], --logfile [LOGFILE]
                         log file name. SFC logs only to console by default. Default: None
 
-Author: @scaleoutSean https://github.com/scaleoutsean/sfc License: the BSD License 3.0
-
+Author: @scaleoutSean https://github.com/scaleoutsean/sfc License: the Apache License 2.0
 ```
 
 

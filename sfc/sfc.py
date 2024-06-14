@@ -23,9 +23,11 @@ import aiohttp
 import asyncio
 from aiohttp import ClientSession, ClientResponseError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from getpass import getpass
 import logging
 from logging.handlers import RotatingFileHandler
 from logging.handlers import QueueHandler
+import os
 import random
 import sys
 if not sys.warnoptions:
@@ -46,14 +48,8 @@ INFLUX_PORT = '32290'
 INFLUX_DB = 'sfc'
 SF_MVIP = '192.168.1.30'
 SF_USERNAME = 'monitor'
-SF_PASSWORD = 'monitor123'
+# SF_PASSWORD = ''
 
-# ============== this section can be left as-is ===============================
-
-# The below works for SolidFire 12.5, 12.7 or higher v12
-SF_JSON_PATH = '/json-rpc/12.5/'
-SF_URL = 'https://' + SF_USERNAME + ":" + SF_PASSWORD + '@' + SF_MVIP
-SF_POST_URL = SF_URL + SF_JSON_PATH
 
 # Use startup sfc.py startup arguments (sfc.py -h) to modify main intervals
 INT_HI_FREQ = 60
@@ -63,7 +59,6 @@ INT_EXPERIMENTAL_FREQ = 600
 
 # Check the source code to see what this does
 CHUNK_SIZE = 24
-
 # =============== functions code ==============================================
 
 
@@ -1200,12 +1195,26 @@ if __name__ == '__main__':
         description="Collects SolidFire metrics and sends them to InfluxDB.",
         epilog="Author: @scaleoutSean\nhttps://github.com/scaleoutsean/sfc\nLicense: the Apache License 2.0"
     )
-    parser.add_argument('-m', '--mvip', nargs='?', const=1, type=str, default=SF_MVIP, required=False,
-                        help='MVIP or FQDN of SolidFire cluster from which metrics should be collected. Default: ' + SF_MVIP)
-    parser.add_argument('-u', '--username', nargs='?', const=1, type=str, default=SF_USERNAME,
-                        required=False, help='username for SolidFire array. Default: ' + SF_USERNAME)
-    parser.add_argument('-p', '--password', nargs='?', const=1, default=SF_PASSWORD, required=False,
-                        help='password for admin account on SolidFire cluster. Default: ' + SF_PASSWORD)
+    parser.add_argument('-m', '--mvip', nargs='?', const=1, type=str, default='', required=False,
+                        help='MVIP or FQDN of SolidFire cluster from which metrics should be collected.')
+    parser.add_argument(
+        '-u',
+        '--username',
+        type=str,
+        required=False,
+        default=os.environ.get(
+            'SF_USERNAME',
+            ''),
+        help='username for SolidFire array. Default: SF_USERNAME')
+    parser.add_argument(
+        '-p',
+        '--password',
+        type=str,
+        required=False,
+        default=os.environ.get(
+            'SF_PASSWORD',
+            ''),
+        help='password for admin account on SolidFire cluster. Default: SF_PASSWORD.')
     parser.add_argument('-ih', '--influxdb-host', nargs='?', const=1, type=str, default=INFLUX_HOST,
                         required=False, help='host IP or name of InfluxDB. Default: ' + INFLUX_HOST)
     parser.add_argument('-ip', '--influxdb-port', nargs='?', const=1, type=int,
@@ -1225,6 +1234,7 @@ if __name__ == '__main__':
     parser.add_argument('-lf', '--logfile', nargs='?', const=1, type=str, default=None,
                         required=False, help='log file name. SFC logs only to console by default. Default: None')
     args = parser.parse_args()
+    print(args)
     FORMAT = '%(asctime)-15s - %(levelname)s - %(funcName)s - %(message)s'
     if args.logfile:
         logging.info('Logging to file: ' + args.logfile)
@@ -1238,10 +1248,24 @@ if __name__ == '__main__':
     logging.getLogger("asyncio").setLevel(level=args.loglevel)
     logging.getLogger('apscheduler').setLevel(level=args.loglevel)
     logging.getLogger('aiohttp').setLevel(level=args.loglevel)
+
+    if args.username == '' or args.username is None:
+        args.username = getpass("Enter the username for SolidFire cluster: ")
+
+    if args.password == '' or args.password is None:
+        args.password = getpass(
+            "Enter the password for SolidFire cluster (not logged): ")
+
     if args.experimental == True:
         logging.warning('Experimental collectors enabled.')
     else:
         logging.info('Experimental collectors disabled (recommended default)')
+
+    # The below works for SolidFire 12.5, 12.7 or higher v12
+    SF_JSON_PATH = '/json-rpc/12.5/'
+    SF_URL = 'https://' + args.username + ":" + args.password + '@' + SF_MVIP
+    SF_POST_URL = SF_URL + SF_JSON_PATH
+
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
