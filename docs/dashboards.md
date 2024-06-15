@@ -10,7 +10,7 @@
   - [Reference InfluxQL queries and dashboard examples SFC](#reference-influxql-queries-and-dashboard-examples-sfc)
     - [Notes](#notes)
     - [Account efficiency (`account_efficiency`)](#account-efficiency-account_efficiency)
-    - [Accounts (`account`)](#accounts-account)
+    - [Accounts (`accounts`)](#accounts-accounts)
     - [Cluster capacity (`cluster_capacity`)](#cluster-capacity-cluster_capacity)
     - [Cluster faults (`cluster_faults`)](#cluster-faults-cluster_faults)
     - [Cluster performance (`cluster_performance`)](#cluster-performance-cluster_performance)
@@ -160,7 +160,7 @@ SELECT mean("compression"), mean("deduplication")
 ![Account storage efficiency](../images/sfc-example-dashboard-01-account-storage-efficiency.png)
 
 
-### Accounts (`account`)
+### Accounts (`accounts`)
 
 ```sql
 SELECT mean("volume_count") FROM "accounts" 
@@ -383,7 +383,7 @@ Third, if network is fast or volumes small, you may rarely see these jobs even t
 
 ![Sync jobs](../images/sfc-example-dashboard-16-sync-jobs.png)
 
-Fourth, notice that remaining time may be 0, so Grafana won't show anything (well, showing 0 may help as long as you don't show anything for NaN). In any case, this is normal - SolidFire may be comparing changes but not yet copying, so there's n way to give a meaningful time remaining, while the next time SFC checks, the job is done and gone.
+Fourth, notice that remaining time may be 0, so Grafana won't show anything (well, showing 0s in this panel may help as long as NaN isn't shown as 0). In any case, this is normal - SolidFire may be comparing changes but not yet copying, so there's no way to give a meaningful time remaining, while the next time SFC checks, the job is done and gone.
 
 ```sql
 > select * from sync_jobs
