@@ -19,6 +19,8 @@
     - [Node performance (`node_performance`)](#node-performance-node_performance)
     - [iSCSI connections (`iscsi_sessions`)](#iscsi-connections-iscsi_sessions)
     - [QoS Histograms (`histogram_*`)](#qos-histograms-histogram_)
+    - [Snapshots (`snapshots`)](#snapshots-snapshots)
+    - [Sync jobs (`sync_jobs`)](#sync-jobs-sync_jobs)
     - [Volume efficiency (`volume_efficiency`)](#volume-efficiency-volume_efficiency)
     - [Volumes (`volumes`)](#volumes-volumes)
     - [Volume performance (`volume_performance`)](#volume-performance-volume_performance)
@@ -352,6 +354,49 @@ This is why I consider QoS Histograms experimental - until I understand what thi
 
 ![Volume QoS Histogram - write block size for a volume](../images/sfc-example-dashboard-09-volume-qos-histograms-time-below-min-iops.png)
 
+### Snapshots (`snapshots`)
+
+TODO - not yet implemented. 
+
+There are two tasks here, one is plain snapshots (name, ID, retention, etc.) and the other is replicated snapshots, where there's more detail about replication relationship, replication delay, state, etc. 
+
+Pull requests are welcome.
+
+### Sync jobs (`sync_jobs`)
+
+This one is "special". 
+
+First, SFC currently parses only one type of SolidFire sync job, remote sync used for initial replication (and re-sync).
+
+Second, in my observation you can view these only on the cluster where replication is *in*-bound. If you have replication flowing in one direction, I think you can get these details only at the destination.
+
+Below `cluster::tag = 'DR'` is for that. Use the right name of the cluster that is a destination (of volume replication).
+
+```sql
+SELECT last("remaining_time") FROM "sync_jobs"
+  WHERE ("cluster"::tag = 'DR') AND $timeFilter 
+  GROUP BY time($interval), "dst_volume_id"::tag 
+  ORDER BY time DESC
+```
+
+Third, if network is fast or volumes small, you may rarely see these jobs even though they're gathered every 60 seconds. For example, I paused and resumed replication half a dozen times here and only once did I see it in Grafana.
+
+![Sync jobs](../images/sfc-example-dashboard-16-sync-jobs.png)
+
+Fourth, notice that remaining time may be 0, so Grafana won't show anything (well, showing 0 may help as long as you don't show anything for NaN). In any case, this is normal - SolidFire may be comparing changes but not yet copying, so there's n way to give a meaningful time remaining, while the next time SFC checks, the job is done and gone.
+
+```sql
+> select * from sync_jobs
+name: sync_jobs
+time                 blocks_per_sec cluster dst_volume_id elapsed_time pct_complete remaining_time    stage type
+----                 -------------- ------- ------------- ------------ ------------ --------------    ----- ----
+2024-06-15T14:48:40Z 101968         DR      11            1            31           2.225806451612903 data  remote
+2024-06-15T15:13:44Z 20404          DR      10            87           0            0                 data  remote
+2024-06-15T15:14:44Z 20404          DR      10            87           0            0                 data  remote
+2024-06-15T15:22:44Z 60269          DR      11            6            0            0                 data  remote
+```
+
+Fifth, the example above is for "time remaining". You may select other fields which may be more useful to you.
 
 ### Volume efficiency (`volume_efficiency`)
 
@@ -407,21 +452,15 @@ SELECT last("remote_replication_mode") FROM "volumes"
 
 ![Volumes - by replication mode](../images/sfc-example-dashboard-13-volume-properties-replication-mode.png)
 
-Volume replication *progress* isn't available in volume properties or other SolidFire API (that I know of), but it may be possible to watch writeBytes on replication *target* to see if it's incrementing and from that derive replication throughput on that relationship.
+You can try different visualizations, of course. This one shows 6 volumes, although only 3 are being replicated. How's that possible? Well, I started monitoring both sides (two clusters) to view sync job progress, and suddenly I saw six volumes. My query above is not limited to any specific cluster name (tag), so as soon as two sites started sending in data, the panel changed from showing three volumes to showing six. Of course, you can adjust this to filter by site or show each site in a different panel, etc.
 
-This hasn't been tested, but it's included in the reference dashboard. The assumption is volume ID 162 has access set to replicationTarget, i.e. the only writes are coming from replication "workload".
+![Volumes - by replication mode](../images/sfc-example-dashboard-15-volume-replication-mode-async-snapshotsonly.png)
 
-```sql
-SELECT derivative(sum("write_bytes"), 60s) FROM "volume_performance" 
-  WHERE ("id"::tag = '162') AND $timeFilter 
-  GROUP BY time($interval), "id"::tag
-```
+Replication monitoring is new in SFC v2 and based on feedback the details may be changed. Currently it is limited to the just two clusters, i.e. only the first replication relationship for a volume is captured, parsed and stored. If a volume has more than one pair, SFC will ignore the rest.
 
-I don't know if replication writes register in writeBytes. If they do, that should work fine for people with static volume pairings where adding a bunch of IDs to a panel is one-time effort. 
+If you're interested in these details, see [this](https://scaleoutsean.github.io/2024/06/15/sfc-adds-volume-replication-monitoring.html) for more on the initial implementation and [this](https://scaleoutsean.github.io/2024/06/14/netapp-solidfire-replication-monitoring.html) for API-related background and various considerations. The SolidFire API returns descriptive strings, and SFC stores numbers. For example: Async gets stored as 1, Sync as 2, SnapshotsOnly as 3, in InfluxDB. For replication states, there's a bunch of them, and the up-to-date mapping can be found in the SFC source code. Where 0 values could be confusing as numeric proxies for `null` or `None`, I use `-1`. So if you see `-1` somewhere related to replication, that's usually "not configured" i.e. the volume isn't even paired. Then you can filter out such values (lower than 0) in queries and/or Grafana.
 
-Unfortunately `write_bytes` comes from the volume *performance* method (and is therefore in `volume_performance` measurement), while `access` (readWrite, replicationTarget) is a volume property (and hence in the `volumes` measurement), so there's no instant way to get both at once.
-
-Replication monitoring is new in SFC v2 and based on feedback, these details can be adjusted.
+For the monitoring of initial replication sync ("baseline copy") we need to [use `ListSyncJobs`](https://scaleoutsean.github.io/2024/06/14/netapp-solidfire-replication-monitoring.html) which is available in [Sync jobs](#sync-jobs-sync_jobs).
 
 ### Volume performance (`volume_performance`)
 
@@ -465,4 +504,20 @@ Finally, remember that burst credits on a volume are accumulated when iSCSI clie
 If a Web server rotates logs when they reach 100 MiB and compresses those by writing them out in 1 MiB requests, 9,000 in 4 KiB may [translate](https://docs.netapp.com/us-en/element-software/concepts/concept_data_manage_volumes_solidfire_quality_of_service.html#qos-performance) to a fraction of that value (let's say 2%, which is 180, enough for 180 x 1MiB requests) which in turn means this burst budget is enough to read a 100 MiB log file (access.log.1) and gzip it to disk as a 35 MB access.log.gz without getting throttled. You can also find appropriate values experimentally by looking at volume utilization percentage or one of the QoS histograms.
 
 Huge burst credit on a volume may mean the volume MaxIOPS setting is too generous. Sometimes that's the idea, but other times that may be wasteful. If there's no problem, there's no need to worry about this, but when it is a problem being able to see this can be helpful.
+
+Volume async replication delay is a property in volume performance measurement. It exists *only* for volumes that are in async replication mode and it's shown only for the source, not the target, volume.
+
+```sql
+SELECT last("async_delay") FROM "volume_performance" 
+  WHERE ("async_delay"::field > -1) AND $timeFilter 
+  GROUP BY time($interval), "name"::tag
+```
+
+Stat panels work well for this, but we can also watch async delay over time. 
+
+Where 0 is used (e.g. async delay) is 0 seconds. To avoid confusion with volumes that aren't even a source of replication, all non-replicating volumes get `-1` here, so just eliminate such volumes from panels when working in Grafana.
+
+![Volume async replication delay](../images/sfc-example-dashboard-14-volume-async-replication-delay.png)
+
+Note that replicated snapshots, which are asynchronously replicated as well, are their own "feature" and you can't see snapshot replication delay in volume performance metrics. See [Snapshots](#snapshots-snapshots).
 

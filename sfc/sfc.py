@@ -16,24 +16,26 @@
 
 # =============== imports =====================================================
 
-import time
+
 import argparse
-import logging.handlers
 import aiohttp
 import asyncio
 from aiohttp import ClientSession, ClientResponseError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import datetime
 from getpass import getpass
 import logging
+import logging.handlers
 from logging.handlers import RotatingFileHandler
 from logging.handlers import QueueHandler
 import os
 import random
+import re
 import sys
 if not sys.warnoptions:
     import os
     import warnings
-import logging
+import time
 warnings.simplefilter("default")
 os.environ["PYTHONWARNINGS"] = "default"
 
@@ -121,8 +123,6 @@ async def volumes(session, **kwargs):
          'remote_volume_id'),
         ('remoteVolumeName',
          'remote_volume_name'),
-        ('remote_replication_state',
-         'remote_replication_state'),
         ('scsiNAADeviceID',
          'scsi_naa_dev_id'),
         ('volumeConsistencyGroupUUID',
@@ -139,7 +139,11 @@ async def volumes(session, **kwargs):
         ('qosPolicyID',
          'qos_policy_id'),
         ('remote_replication_mode',
-         'remote_replication_mode'),
+         'remote_replication_mode'),        
+        ('remote_replication_state',
+         'remote_replication_state'),
+        ('remote_replication_snap_state',
+         'remote_replication_snap_state'),
         ('totalSize',
          'total_size')]
     for t in tags_non_paired:
@@ -235,7 +239,7 @@ async def volumes(session, **kwargs):
                 k = field[0]
                 nk = field[1]
                 val = volume[k]
-                val = str(val) + "i"
+                val = str(val) + "i"                
                 kv = nk + "=" + val
                 if k in [x[0] for x in fields[0:-1]]:
                     single_volume = single_volume + kv + ","
@@ -244,10 +248,7 @@ async def volumes(session, **kwargs):
                 if volume_paired == True:
                     logging.debug("single_volume tags for volume + " +
                                   str(volume['volumeID']) + ": " + str(single_volume))
-            volumes = volumes + single_volume + "\n"
-            if volume_paired == True:
-                logging.debug("volumes payload for " +
-                              str(volume['volumeID']) + ": " + str(volumes))
+            volumes = volumes + single_volume + "\n"            
         await send_to_influx(volumes)
     elif kwargs.keys() == {'names'} or kwargs.keys() == {'names_dict'}:
         for key in kwargs:
@@ -265,7 +266,7 @@ async def volumes(session, **kwargs):
         return False
     time_taken = (round(time.time(), 3) - time_start)
     if args.loglevel == 'DEBUG':
-        logging.debug("Volumes payload: " + str(volumes) + ".")
+        logging.debug("Volumes payload:\n " + str(volumes) + ".")
     logging.info('Volumes collected in ' + str(time_taken) + ' seconds.')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     return volumes
@@ -279,7 +280,7 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
     Currently only the first paired volume is processed. Additional volumes and values may be added in the future.
     """
     time_start = round(time.time(), 3)
-    function_name = 'volume_replication'  # with names
+    function_name = 'extract_volume_pair' 
     vp = {}
     if volume_pairs == [] or len(volume_pairs) > 1:
         logging.debug('volume_pairs list ' + str(volume_pairs) + '.')
@@ -303,16 +304,29 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
                 logging.warning('KeyError in volume_pair list: ' + str(e))
                 return {}
         try:
-            mode_mapping = [('Async', 1), ('Sync', 2), ('SnapshotsOnly', 3)]
             # NOTE: this order (Async/Sync/SnapshotsOnly) is based on the SolidFire UI.
             # Numbering starts from 1 as 0 seems suitable for non-paired
-            # volumes
-            vp['remote_replication_mode'] = [
-                x[1] for x in mode_mapping if x[0] == vp_dict['remoteReplication']['mode']][0]
-            vp['remote_replication_state'] = vp_dict['remoteReplication']['state']
+            # volumes. Unknown is set to 100 to leave room for existing states not yet here.
+            
+            mode_map = [('Async', 1), ('Sync', 2), ('SnapshotsOnly', 3), ('None', 100)]
+            mode = vp_dict['remoteReplication']['mode'] if vp_dict['remoteReplication']['mode'] in [x[0] for x in mode_map] else 'None'
+            vp['remote_replication_mode'] = next((x[1] for x in mode_map if x[0] == mode), None)            
+
+            # NOTE: one option is to change these into Pythonic snake case, and deal with it in Grafana
+            # and another is to simply use integers for the states and assign 100 to unseen and unknown 
+            # Source of state keys: NetApp TR-4741 (2020), page 26, and observation on SF Demo VM 12.5
+
+            rep_state_map = [('Active', 1), ('Idle', 2), ('PausedDisconnected', 3), ('PausedManual', 4), ('PausedDisconnected', 5), ('PausedManualRemote', 6), ('ResumingConnected', 7), ('ResumingDataTransfer', 8), ('ResumingLocalSync', 9), ('ResumingRRSync', 10), ('None', 100)]
+            rep_state_mode = vp_dict['remoteReplication']['state'] if vp_dict['remoteReplication']['state'] in [x[0] for x in rep_state_map] else 'None'
+            vp['remote_replication_state'] =  next((x[1] for x in rep_state_map if x[0] == rep_state_mode), None)
+            
+            snap_state_map = [('Active', 1), ('Idle', 2), ('PausedDisconnected', 3), ('PausedManual', 4), ('PausedDisconnected', 5), ('PausedManualRemote', 6), ('ResumingConnected', 7), ('ResumingDataTransfer', 8), ('ResumingLocalSync', 9), ('ResumingRRSync', 10), ('None', 100)]
+            snap_state_mode = vp_dict['remoteReplication']['snapshotReplication']['state'] if vp_dict['remoteReplication']['snapshotReplication']['state'] in [x[0] for x in snap_state_map] else 'None'
+            vp['remote_replication_snap_state'] = next((x[1] for x in snap_state_map if x[0] == snap_state_mode), None)
+                
         except KeyError as e:
             logging.warning(
-                'KeyError while parsing remoteReplication: ' + str(e))
+                'KeyError while parsing remoteReplication dictionary: ' + str(e))
             return {}
     time_taken = (round(time.time(), 3) - time_start)
     if args.loglevel == 'DEBUG':
@@ -324,6 +338,80 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     return vp
 
+async def sync_jobs(session):
+    """
+    Obtains information about synchronization jobs using ListSyncJobs and sends to InfluxDB.
+
+    Sync jobs are used in SolidFire replication to initially synchronize volume data between paired volumes.
+    This function currently only supports 'remote' type sync jobs.
+    """
+    time_start = round(time.time(), 3)
+    function_name = 'sync_jobs'
+    api_payload = "{ \"method\": \"ListSyncJobs\" }"
+    async with session.post(SF_POST_URL, data=api_payload) as response:
+        r = await response.json()
+    result = r['result']['syncJobs']
+    if args.loglevel == 'DEBUG':
+        logging.debug('Sync jobs result: ' + str(result) + '.')
+    if result == []:
+        logging.debug('No sync jobs found. Returning.')
+        return
+    else:
+        # NOTE: there are different kinds of jobs (clone, remote replication, slice synchronization)
+        # Ech has unique tags and fields
+        # See https://docs.netapp.com/us-en/element-software/api/reference_element_api_syncjob.html
+        # type: one of clone slice block remote
+        tags = [('dstVolumeID', 'dst_volume_id'), ('stage', 'stage'), ('type', 'type')]
+        fields = [('blocksPerSecond', 'blocks_per_sec'), ('elapsedTime', 'elapsed_time'), ('percentComplete', 'pct_complete'), ('remainingTime', 'remaining_time')]
+        sync_jobs = ''
+        for i in result:
+            # NOTE: this is a single sync job of 'remote' type. Until we get API examples with real-life data, other types will be discarded
+            if i['type'] == 'remote':
+                logging.info('Processing remote sync job with ID ' + str(i['dstVolumeID']) + '.')
+                single_sync_job = "sync_jobs,cluster=" + CLUSTER_NAME + ","
+                for tag in tags:
+                    k = tag[0]
+                    nk = tag[1]
+                    val = i[k]
+                    kv = nk + "=" + str(val)
+                    if k in [x[0] for x in tags[0:-1]]:
+                        single_sync_job = single_sync_job + kv + ","
+                    else:
+                        single_sync_job = single_sync_job + kv + " "
+                for field in fields:
+                    k = field[0]
+                    nk = field[1]
+                    val = i[k]
+                    # NOTE: contrary to the docs, blocks_per_sec seems to be an integer 
+                    # NOTE: https://github.com/NetAppDocs/element-software/issues/204
+                    if nk in ['blocks_per_sec', 'elapsed_time', 'pct_complete']: 
+                        val = str(val) + "i"
+                    elif nk == 'remaining_time':
+                        # NOTE: Uhm, yeah. It's possible.                        
+                        if val == None:
+                            val = "0"
+                    # NOTE: looks like an API bug, remaining_time is a float
+                    else:    
+                        val = str(val) 
+                    kv = nk + "=" + val
+                    if k in [x[0] for x in fields[0:-1]]:
+                        single_sync_job = single_sync_job + kv + ","
+                    else:
+                        single_sync_job = single_sync_job + kv + " "
+                sync_jobs = sync_jobs + single_sync_job + "\n"
+            else:
+                logging.debug('Sync job type ' + str(i['type']) + ' is not yet supported. You may submit this record to have it considered for inclusion in SFC. Skipping.')
+                logging.info('Skipped sync job: ' + str(i))
+    await send_to_influx(sync_jobs)
+    time_taken = (round(time.time(), 3) - time_start)
+    if args.loglevel == 'DEBUG':
+        logging.debug('Sync jobs payload:\n' + str(sync_jobs) + '.')
+    logging.info(
+        'Sync jobs obtained and sent in ' +
+        str(time_taken) +
+        ' seconds.')
+    await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
+    return
 
 async def volume_performance(session, **kwargs):
     """
@@ -332,40 +420,61 @@ async def volume_performance(session, **kwargs):
     Uses volumes() function to get ID-to-name mapping for volumes.
     """
     time_start = round(time.time(), 3)
+    function_name = 'volume_performance'
     try:
         all_volumes = await volumes(session, names=True)
         isinstance(all_volumes, list)
-        logging.debug('Volume information obtained and is a list with' +
+        logging.debug('Volume information obtained and is a list of ' +
                       str(len(all_volumes)) + ' elements.')
     except Exception as e:
         logging.error(
             'Volume information not obtained or malformed. Returning.')
         logging.error(e)
         return
-    function_name = 'volume_performance'  # no names
-
-    fields = [('actualIOPS', 'actual_iops'), ('averageIOPSize', 'average_io_size'), ('burstIOPSCredit', 'burst_io_credit'), ('clientQueueDepth', 'client_queue_depth'), ('latencyUSec', 'latency_usec'), ('nonZeroBlocks', 'non_zero_blocks'),
+    fields = [('actualIOPS', 'actual_iops'), ('averageIOPSize', 'average_io_size'), ('asyncDelay', 'async_delay'), ('burstIOPSCredit', 'burst_io_credit'), ('clientQueueDepth', 'client_queue_depth'), ('latencyUSec', 'latency_usec'), ('nonZeroBlocks', 'non_zero_blocks'),
               ('normalizedIOPS', 'normalized_iops'), ('readBytes', 'read_bytes'), ('readBytesLastSample', 'read_bytes_last_sample'), ('readLatencyUSec',
                                                                                                                                       'read_latency_usec'), ('readOpsLastSample', 'read_ops_last_sample'), ('throttle', 'throttle'), ('volumeSize', 'volume_size'),
-              ('volumeUtilization', 'volume_utilization'), ('writeBytes', 'write_bytes'), ('writeBytesLastSample', 'write_bytes_last_sample'), ('writeLatencyUSec', 'write_latency_usec'), ('writeOpsLastSample', 'write_ops_last_sample'), ('zeroBlocks', 'zero_blocks')]
+              ('volumeUtilization', 'volume_utilization'), ('writeBytes', 'write_bytes'), ('writeBytesLastSample', 'write_bytes_last_sample'), ('writeLatencyUSec', 'write_latency_usec'), ('writeOpsLastSample', 'write_ops_last_sample'), ('zeroBlocks', 'zero_blocks')]    
     if len(all_volumes) > CHUNK_SIZE:
         logging.info('Splitting volumes list with length ' +
                      str(len(all_volumes)) + ' using chunk size ' + str(CHUNK_SIZE) + '.')
         volume_lists = await _split_list(all_volumes)
     else:
         volume_lists = []
-        volume_lists.append(all_volumes)
+        volume_lists.append(all_volumes)    
+    
     volumes_performance = ''
     b = 0
     for volume_batch in volume_lists:
-        logging.info('Processing volume batch of ' +
+        logging.info('Processing volume batch ' + str(b) + ' with ' +
                      str(len(volume_batch)) + ' volumes.')
         volume_batch_ids = [x[0] for x in volume_batch]
+        logging.info("Volume batch IDs:\n" + str(volume_batch_ids) + ".")
         api_payload = "{ \"method\": \"ListVolumeStats\", \"params\": { \"volumeIDs\": " + \
             str(volume_batch_ids) + "}}"
+        # logging.debug("API payload for volume stats:\n" + str(api_payload) + ".")
         async with session.post(SF_POST_URL, data=api_payload) as response:
             r = await response.json()
         result = r['result']['volumeStats']
+        # NOTE: we need to convert the asyncDelay from null to integer or parse the string to seconds:int
+        # NOTE: asyncDelay is a string like "00:00:01.123456" (1.1s)
+        async_delay_pattern = re.compile('\d{2}:\d{2}:\d{2}.\d{5}')
+        for volume in result:
+            # logging.debug('Processing volume ' + str(volume['volumeID']) + '. Data: ' + str(volume) + '.')
+            if volume['asyncDelay'] != None:
+                # logging.debug('Volume has non-null asyncDelay. Converting to seconds for volume ' + str(volume['volumeID']) + '.')                        
+                try: 
+                    if async_delay_pattern.match(volume['asyncDelay']):
+                        async_delay_tp = datetime.datetime.strptime(volume['asyncDelay'],"%H:%M:%S.%f")
+                        volume['asyncDelay'] = async_delay_tp.hour * 3600 + async_delay_tp.minute * 60 + async_delay_tp.second
+                        # logging.debug('Converted asyncDelay to seconds for volume ' + str(volume['volumeID']) + ': ' + str(volume['asyncDelay']) + '.')
+                except TypeError as e:
+                    logging.error('Failed to convert asyncDelay text string to seconds (int) for volume ' + str(volume['volumeID']) + '. Problem string: ' + str(volume['asyncDelay']) + '. Setting to -1 to surface in Grafana. Error: ' + str(e) + '.')
+                    volume['asyncDelay'] = int(-1)
+            else:
+                logging.debug('Volume has null asyncDelay. Setting it to -1 for volume ' + str(volume['volumeID']) + '.')
+                volume['asyncDelay'] = -1
+            # logging.debug('Processed volume ' + str(volume['volumeID']) + '. Data: ' + str(volume) + '.')
         volume_performance = ''
         for volume in result:
             volume_line = ''
@@ -375,7 +484,7 @@ async def volume_performance(session, **kwargs):
                     kv_list = ''
                     for field in fields:
                         k = field[0]
-                        nk = field[1]
+                        nk = field[1]                        
                         val = volume[k]
                         if isinstance(
                                 val, float) or k == 'throttle' or k == 'volumeUtilization':
@@ -390,18 +499,20 @@ async def volume_performance(session, **kwargs):
                     volume_line = "volume_performance,cluster=" + CLUSTER_NAME + ",id=" + \
                         str(volume['volumeID']) + ",name=" + \
                         volume_name + " " + kv_list
-            volume_performance = volume_performance + volume_line + "\n"
+            ts = str(int(round(time.time(),0))) # NOTE: timestamp for the record
+            volume_performance = volume_performance + volume_line + ts + "\n"
+            # logging.debug('Volume performance line for volume ID ' + str(volume['volumeID']) + ':\n' + str(volume_line))
         b = b + 1
         volumes_performance = volumes_performance + volume_performance
-        logging.info('Volume performance batch with ' + str(b) + ' items done')
-        await send_to_influx(volumes_performance)
+        # logging.debug('Volume performance batch for batch item ' + str(b) + ':\n' + str(volume_performance))
+    await send_to_influx(volumes_performance)
     time_taken = (round(time.time(), 3) - time_start)
     if args.loglevel == 'DEBUG':
-        logging.debug("Volume performance payload " + str(volumes_performance))
+        logging.debug("Volume performance payload:\n" + str(volumes_performance))
     logging.info('Volume performance gathered in ' +
                  str(time_taken) + ' seconds')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
-    return volumes_performance
+    return
 
 
 async def accounts(session):
@@ -985,7 +1096,8 @@ async def send_to_influx(payload):
     """
     Send received payload to InfluxDB.
     """
-    measurement = payload.split(",")[0]
+    measurement = payload.split(",")[0]    
+    logging.debug('send_to_influx() received data for ' + measurement + ': ' +    str(payload.count('\n')) + ' lines.')
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(enable_cleanup_closed=True)) as session:
         urlPostEndpoint = 'http://' + INFLUX_HOST + ':' + \
             INFLUX_PORT + '/write?db=' + INFLUX_DB + "&precision=s"
@@ -1007,8 +1119,6 @@ async def _split_list(long_list: list) -> list:
     """
     Splits long list into a list of shorter lists.
     """
-    logging.info('Split ' + str(len(long_list)) +
-                 ' long list using chunk size ' + str(CHUNK_SIZE))
     list_length = len(long_list)
     if list_length <= CHUNK_SIZE:
         logging.info('List not long enough to split')
@@ -1016,6 +1126,9 @@ async def _split_list(long_list: list) -> list:
     else:
         shorter_lists = [long_list[i:i + CHUNK_SIZE]
                          for i in range(0, len(long_list), CHUNK_SIZE)]
+        logging.info('Split ' + str(len(long_list)) +
+                 ' long list using chunk size ' + str(CHUNK_SIZE))
+        logging.debug('Lists created: ' + str(len(shorter_lists)) + ' . List printout:\n' + str(shorter_lists) + '.')
         return shorter_lists
 
 
@@ -1034,10 +1147,14 @@ async def hi_freq_tasks():
     May include some non-time-sensitive metrics if they have essential inputs for time-sensitive metrics.
     """
     time_start = round(time.time(), 3)
+    global ITERATION
+    ITERATION += 1
+    logging.info("Iteration: " + str(ITERATION) + " of high-frequency tasks.")
     session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(
-        enable_cleanup_closed=True, timeout_ceil_threshold=20), headers=headers)
+        # enable_cleanup_closed=True, timeout_ceil_threshold=20), headers=headers)
+        enable_cleanup_closed=True), headers=headers)
     task_list = [cluster_faults, cluster_performance,
-                 node_performance, volume_performance]
+                 node_performance, volume_performance, sync_jobs]
     logging.info('High-frequency tasks: ' + str(len(task_list)))
     bg_tasks = set()
     for t in task_list:
@@ -1048,7 +1165,7 @@ async def hi_freq_tasks():
     await session.close()
     time_end = round(time.time(), 3)
     time_taken = time_end - time_start
-    logging.info('Completed combined high-frequency collection. Sending to InfluxDB next. Time taken:' +
+    logging.info('Completed combined high-frequency collection. Sending to InfluxDB next. Time taken: ' +
                  str(time_taken) + ' seconds.')
     return
 
@@ -1071,7 +1188,7 @@ async def med_freq_tasks():
     await session.close()
     time_end = round(time.time(), 3)
     time_taken = time_end - time_start
-    logging.info('Completed medium-frequency collection and closed aiohttp session. Time taken:' +
+    logging.info('Completed medium-frequency collection and closed aiohttp session. Time taken: ' +
                  str(time_taken) + ' seconds.')
     return
 
@@ -1095,7 +1212,7 @@ async def lo_freq_tasks():
     await session.close()
     time_end = round(time.time(), 3)
     time_taken = time_end - time_start
-    logging.info('Completed low-frequency collection and closed aiohttp session. Time taken:' +
+    logging.info('Completed low-frequency collection and closed aiohttp session. Time taken: ' +
                  str(time_taken) + ' seconds.')
     return
 
@@ -1118,7 +1235,7 @@ async def experimental():
     await session.close()
     time_end = round(time.time(), 3)
     time_taken = time_end - time_start
-    logging.info('Completed combined experimental collection. Sending to InfluxDB next. Time taken:' +
+    logging.info('Completed combined experimental collection. Sending to InfluxDB next. Time taken: ' +
                  str(time_taken) + ' seconds.')
     return
 
@@ -1158,8 +1275,9 @@ async def get_cluster_name():
         async with session.get(url, allow_redirects=True) as resp:
             result = await resp.json()
     cluster_name = result['result']['clusterInfo']['name']
-    logging.info('Obtained SolidFire cluster info for tagging of SolidFire metrics. Time taken:' +
-                 str(time.time() - time_start) + ' seconds.')
+    time_end = round(time.time(), 3)
+    time_taken = time_end - time_start    
+    logging.info('Obtained SolidFire cluster name for tagging of SolidFire metrics: ' + str(cluster_name) + '. Time taken: ' + str(time_taken) + ' seconds.')
     return cluster_name
 
 
@@ -1168,11 +1286,14 @@ async def get_cluster_name():
 
 async def main():
     await create_database(INFLUX_DB)
+    # NOTE: global variable for iteration count in high-frequency tasks    
+    global ITERATION
+    ITERATION = 0
     global CHUNK_SIZE
     global CLUSTER_NAME
     CLUSTER_NAME = await get_cluster_name()
     scheduler = AsyncIOScheduler(misfire_grace_time=10)
-    scheduler.add_job(hi_freq_tasks, 'interval', seconds=INT_HI_FREQ)
+    scheduler.add_job(hi_freq_tasks, 'interval', seconds=INT_HI_FREQ, max_instances=1)
     scheduler.add_job(med_freq_tasks, 'interval', seconds=INT_MED_FREQ)
     scheduler.add_job(lo_freq_tasks, 'interval', seconds=INT_LO_FREQ)
     if args.experimental == True:
@@ -1234,7 +1355,7 @@ if __name__ == '__main__':
     parser.add_argument('-lf', '--logfile', nargs='?', const=1, type=str, default=None,
                         required=False, help='log file name. SFC logs only to console by default. Default: None')
     args = parser.parse_args()
-    print(args)
+    
     FORMAT = '%(asctime)-15s - %(levelname)s - %(funcName)s - %(message)s'
     if args.logfile:
         logging.info('Logging to file: ' + args.logfile)

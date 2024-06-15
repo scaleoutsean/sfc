@@ -792,6 +792,143 @@
       },
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 21,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "maxHeight": 600,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "alias": "network utilization",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_SFC}"
+          },
+          "groupBy": [
+            {
+              "params": [
+                "$__interval"
+              ],
+              "type": "time"
+            },
+            {
+              "params": [
+                "null"
+              ],
+              "type": "fill"
+            }
+          ],
+          "measurement": "node_performance",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "refId": "A",
+          "resultFormat": "time_series",
+          "select": [
+            [
+              {
+                "params": [
+                  "network_utilization_cluster"
+                ],
+                "type": "field"
+              },
+              {
+                "params": [],
+                "type": "mean"
+              }
+            ],
+            [
+              {
+                "params": [
+                  "network_utilization_storage"
+                ],
+                "type": "field"
+              },
+              {
+                "params": [],
+                "type": "mean"
+              }
+            ]
+          ],
+          "tags": []
+        }
+      ],
+      "title": "Node - network utilization",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_SFC}"
+      },
+      "fieldConfig": {
+        "defaults": {
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -826,7 +963,7 @@
         "h": 11,
         "w": 18,
         "x": 0,
-        "y": 16
+        "y": 20
       },
       "id": 12,
       "options": {
@@ -930,7 +1067,7 @@
         "h": 11,
         "w": 6,
         "x": 18,
-        "y": 16
+        "y": 20
       },
       "id": 13,
       "options": {
@@ -1060,7 +1197,7 @@
         "h": 4,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 31
       },
       "id": 15,
       "options": {
@@ -1201,7 +1338,7 @@
         "h": 4,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 35
       },
       "id": 4,
       "options": {
@@ -1327,7 +1464,7 @@
         "h": 5,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 39
       },
       "id": 2,
       "options": {
@@ -1476,7 +1613,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 44
       },
       "id": 8,
       "options": {
@@ -1664,7 +1801,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 47
+        "y": 51
       },
       "id": 18,
       "options": {
@@ -1830,7 +1967,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 54
+        "y": 58
       },
       "id": 9,
       "options": {
@@ -2005,7 +2142,120 @@
         "type": "influxdb",
         "uid": "${DS_SFC}"
       },
-      "description": "",
+      "description": "Shows actual IOPS on volumes by ID or by name (pick one in GROUP BY)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
+      "id": 14,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_SFC}"
+          },
+          "groupBy": [
+            {
+              "params": [
+                "$__interval"
+              ],
+              "type": "time"
+            },
+            {
+              "params": [
+                "name::tag"
+              ],
+              "type": "tag"
+            },
+            {
+              "params": [
+                "null"
+              ],
+              "type": "fill"
+            }
+          ],
+          "hide": false,
+          "measurement": "volume_performance",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "query": "SELECT mean(\"average_io_size\"), mean(\"actual_iops\") FROM \"volume_performance\" WHERE (\"id\"::tag = '134') AND $timeFilter GROUP BY time($__interval), \"name\"::tag fill(null)",
+          "rawQuery": false,
+          "refId": "A",
+          "resultFormat": "time_series",
+          "select": [
+            [
+              {
+                "params": [
+                  "actual_iops"
+                ],
+                "type": "field"
+              },
+              {
+                "params": [],
+                "type": "mean"
+              }
+            ]
+          ],
+          "tags": []
+        }
+      ],
+      "title": "Volume performance - actual IOPS",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "volume_performance.mean { (id|name): (.*) }",
+            "renamePattern": "$2"
+          }
+        }
+      ],
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_SFC}"
+      },
+      "description": "Shows actual IOPS on volumes by ID or by name (pick one in GROUP BY)",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2057,7 +2307,7 @@
               }
             ]
           },
-          "unit": "bytes"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -2065,15 +2315,15 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 70
       },
-      "id": 14,
+      "id": 23,
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "hidden",
-          "placement": "right",
-          "showLegend": false
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
           "maxHeight": 600,
@@ -2081,10 +2331,9 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "11.0.0-preview",
+      "pluginVersion": "11.0.0",
       "targets": [
         {
-          "alias": "average IO request size",
           "datasource": {
             "type": "influxdb",
             "uid": "${DS_SFC}"
@@ -2114,22 +2363,10 @@
           "orderByTime": "ASC",
           "policy": "default",
           "query": "SELECT mean(\"average_io_size\"), mean(\"actual_iops\") FROM \"volume_performance\" WHERE (\"id\"::tag = '134') AND $timeFilter GROUP BY time($__interval), \"name\"::tag fill(null)",
-          "rawQuery": true,
+          "rawQuery": false,
           "refId": "A",
           "resultFormat": "time_series",
           "select": [
-            [
-              {
-                "params": [
-                  "average_io_size"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ],
             [
               {
                 "params": [
@@ -2142,18 +2379,19 @@
                 "type": "mean"
               }
             ]
-          ],
-          "tags": [
-            {
-              "condition": "AND",
-              "key": "id::tag",
-              "operator": "=",
-              "value": "134"
-            }
           ]
         }
       ],
-      "title": "Volume performance - average IO size and actual IOPS (vid: 134)",
+      "title": "Volume performance - actual IOPS",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "volume_performance.mean { (id|name): (.*) }",
+            "renamePattern": "$2"
+          }
+        }
+      ],
       "type": "timeseries"
     },
     {
@@ -2221,7 +2459,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 76
       },
       "id": 16,
       "options": {
@@ -2397,7 +2635,7 @@
         "h": 4,
         "w": 24,
         "x": 0,
-        "y": 72
+        "y": 82
       },
       "id": 6,
       "options": {
@@ -2507,7 +2745,7 @@
         "h": 5,
         "w": 24,
         "x": 0,
-        "y": 76
+        "y": 86
       },
       "id": 1,
       "options": {
@@ -2592,69 +2830,223 @@
         "type": "influxdb",
         "uid": "${DS_SFC}"
       },
-      "description": "Panel shows mode of replication for paired SolidFire volumes.",
+      "description": "Chart shows (if you have paired volumes with outgoing replication) delay in seconds for Async replication. \n-1 means the volume is not paired, 0 - no delay, > 0 is delay in seconds. \nChart only shows values > -1, i.e. any non-out-replicating  volumes are hidden.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
           "mappings": [
             {
               "options": {
-                "1": {
-                  "color": "light-red",
+                "-1": {
                   "index": 0,
-                  "text": "Async"
-                },
-                "2": {
-                  "color": "dark-red",
-                  "index": 1,
-                  "text": "Sync"
-                },
-                "3": {
-                  "color": "yellow",
-                  "index": 2,
-                  "text": "SnapshotsOnly"
+                  "text": "not paired"
                 }
               },
               "type": "value"
-            },
-            {
-              "options": {
-                "match": "nan",
-                "result": {
-                  "color": "text",
-                  "index": 3,
-                  "text": "None"
-                }
-              },
-              "type": "special"
             }
           ],
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
+              },
+              {
+                "color": "red",
+                "value": 50000
               }
             ]
-          }
+          },
+          "unit": "s"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
+        "h": 5,
         "w": 24,
         "x": 0,
-        "y": 81
+        "y": 91
       },
-      "id": 19,
+      "id": 22,
       "options": {
-        "colorMode": "value",
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "maxHeight": 600,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_SFC}"
+          },
+          "groupBy": [
+            {
+              "params": [
+                "$interval"
+              ],
+              "type": "time"
+            },
+            {
+              "params": [
+                "name::tag"
+              ],
+              "type": "tag"
+            }
+          ],
+          "measurement": "volume_performance",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "refId": "A",
+          "resultFormat": "time_series",
+          "select": [
+            [
+              {
+                "params": [
+                  "async_delay"
+                ],
+                "type": "field"
+              },
+              {
+                "params": [],
+                "type": "last"
+              }
+            ]
+          ],
+          "tags": [
+            {
+              "key": "async_delay::field",
+              "operator": ">",
+              "value": "-1"
+            }
+          ]
+        }
+      ],
+      "title": "Volume properties - async replication delay",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "volume_performance.last { name: (.*) }",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_SFC}"
+      },
+      "description": "Chart shows (if you have paired volumes with outgoing replication) one of the modes - Async, Sync, SnapshotsOnly",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "1": {
+                  "color": "dark-orange",
+                  "index": 0,
+                  "text": "Async"
+                },
+                "2": {
+                  "color": "red",
+                  "index": 1,
+                  "text": "Sync"
+                },
+                "3": {
+                  "color": "semi-dark-blue",
+                  "index": 2,
+                  "text": "SnapshotsOnly"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              },
+              {
+                "color": "dark-red",
+                "value": 2
+              },
+              {
+                "color": "green",
+                "value": 3
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 96
+      },
+      "id": 26,
+      "options": {
+        "colorMode": "background_solid",
         "graphMode": "area",
         "justifyMode": "auto",
-        "orientation": "auto",
+        "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -2663,7 +3055,7 @@
           "values": false
         },
         "showPercentChange": false,
-        "textMode": "auto",
+        "textMode": "value_and_name",
         "wideLayout": true
       },
       "pluginVersion": "11.0.0",
@@ -2676,7 +3068,7 @@
           "groupBy": [
             {
               "params": [
-                "$__interval"
+                "$interval"
               ],
               "type": "time"
             },
@@ -2685,12 +3077,6 @@
                 "name::tag"
               ],
               "type": "tag"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
             }
           ],
           "measurement": "volumes",
@@ -2712,10 +3098,16 @@
               }
             ]
           ],
-          "tags": []
+          "tags": [
+            {
+              "key": "cluster::tag",
+              "operator": "=",
+              "value": "PROD"
+            }
+          ]
         }
       ],
-      "title": "Volume replication",
+      "title": "Volume properties - replication mode",
       "transformations": [
         {
           "id": "renameByRegex",
@@ -2732,45 +3124,57 @@
         "type": "influxdb",
         "uid": "${DS_SFC}"
       },
-      "description": "This panel assumes volume 162 has access set to replicationTarget, and monitors increase in write_bytes to capture (inbound) replication performance. ",
+      "description": "NOTE: pick the remote cluster to get this information. Start another instance of SFC for the other cluster and in query select WHERE cluster::tag is the remote cluster's name.\nThere are several kinds of sync jobs in SolidFire and SFC v2.0.0 only remote sync job type is implemented. Submit your ListSyncJobs JSON output example to SFC issues to have other jobs added.\nhttps://docs.netapp.com/us-en/element-software/api/reference_element_api_listsyncjobs.html",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "mappings": [
             {
               "options": {
-                "1": {
-                  "color": "light-red",
+                "-1": {
+                  "color": "text",
                   "index": 0,
-                  "text": "Async"
-                },
-                "2": {
-                  "color": "dark-red",
-                  "index": 1,
-                  "text": "Sync"
-                },
-                "3": {
-                  "color": "yellow",
-                  "index": 2,
-                  "text": "SnapshotsOnly"
+                  "text": "0"
                 }
               },
               "type": "value"
-            },
-            {
-              "options": {
-                "match": "nan",
-                "result": {
-                  "color": "text",
-                  "index": 3,
-                  "text": "None"
-                }
-              },
-              "type": "special"
             }
           ],
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2779,32 +3183,30 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "s"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
+        "h": 5,
         "w": 24,
         "x": 0,
-        "y": 87
+        "y": 101
       },
-      "id": 20,
+      "id": 24,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "tooltip": {
+          "maxHeight": 600,
+          "mode": "single",
+          "sort": "none"
+        }
       },
       "pluginVersion": "11.0.0",
       "targets": [
@@ -2822,93 +3224,84 @@
             },
             {
               "params": [
-                "id::tag"
+                "dst_volume_id::tag"
               ],
               "type": "tag"
             }
           ],
-          "measurement": "volume_performance",
-          "orderByTime": "ASC",
+          "measurement": "sync_jobs",
+          "orderByTime": "DESC",
           "policy": "default",
-          "query": "SELECT derivative(sum(\"write_bytes\"), 60s) FROM \"volume_performance\" WHERE (\"id\"::tag = '162') AND $timeFilter GROUP BY time($interval), \"id\"::tag",
-          "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series",
           "select": [
             [
               {
                 "params": [
-                  "write_bytes"
+                  "remaining_time"
                 ],
                 "type": "field"
               },
               {
                 "params": [],
-                "type": "sum"
-              },
-              {
-                "params": [
-                  "10s"
-                ],
-                "type": "derivative"
+                "type": "last"
               }
             ]
           ],
           "tags": [
             {
-              "key": "id::tag",
+              "key": "cluster::tag",
               "operator": "=",
-              "value": "162"
+              "value": "DR"
             }
           ]
         }
       ],
-      "title": "Volume replication performance for volume ID 162",
+      "title": "Volume sync jobs (DR site) - remaining time (s) on volume ID",
       "transformations": [
         {
           "id": "renameByRegex",
           "options": {
-            "regex": "volumes.last { name: (.*) }",
+            "regex": "sync_jobs.last { dst_volume_id: (.*) }",
             "renamePattern": "$1"
           }
         }
       ],
-      "type": "stat"
+      "type": "timeseries"
     },
     {
       "datasource": {
         "type": "influxdb",
         "uid": "${DS_SFC}"
       },
-      "description": "",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": true,
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
-            "fillOpacity": 0,
+            "fillOpacity": 25,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
             },
-            "insertNulls": 3600000,
-            "lineInterpolation": "stepBefore",
+            "insertNulls": false,
+            "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "always",
+            "showPoints": "auto",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -2918,60 +3311,36 @@
               "mode": "off"
             }
           },
-          "fieldMinMax": false,
           "mappings": [],
-          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "volume_replication"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
+              },
               {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
+                "color": "red",
+                "value": 80
               }
             ]
           }
-        ]
+        },
+        "overrides": []
       },
       "gridPos": {
-        "h": 7,
+        "h": 8,
         "w": 24,
         "x": 0,
-        "y": 93
+        "y": 106
       },
-      "id": 17,
+      "id": 25,
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+          "displayMode": "hidden",
+          "placement": "right",
+          "showLegend": false
         },
         "tooltip": {
           "maxHeight": 600,
@@ -2979,7 +3348,6 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "11.0.0",
       "targets": [
         {
           "datasource": {
@@ -3021,19 +3389,19 @@
               },
               {
                 "params": [],
-                "type": "mean"
+                "type": "last"
               }
             ]
           ],
           "tags": []
         }
       ],
-      "title": "SFC function execution time",
+      "title": "SFC internal metrics",
       "transformations": [
         {
           "id": "renameByRegex",
           "options": {
-            "regex": "sfc_metrics.mean { function: (.*) }",
+            "regex": "sfc_metrics.last { function: (.*) }",
             "renamePattern": "$1"
           }
         }
@@ -3041,7 +3409,7 @@
       "type": "timeseries"
     }
   ],
-  "refresh": "5m",
+  "refresh": "30s",
   "schemaVersion": 39,
   "tags": [
     "solidfire",
@@ -3052,7 +3420,7 @@
     "list": []
   },
   "time": {
-    "from": "now-30m",
+    "from": "now-1h",
     "to": "now"
   },
   "timeRangeUpdatedDuringEditOrView": false,
@@ -3074,6 +3442,6 @@
   "timezone": "browser",
   "title": "SFC example  dashboard",
   "uid": "fdmnkenr6wao0a",
-  "version": 51,
+  "version": 58,
   "weekStart": "monday"
 }
