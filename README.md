@@ -10,7 +10,7 @@
   - [FAQs](#faqs)
   - [Architecture](#architecture)
   - [Security](#security)
-    - [How to upload TLS certificate to SolidFire](#how-to-upload-tls-certificate-to-solidfire)
+    - [How to upload your TLS certificate to SolidFire](#how-to-upload-your-tls-certificate-to-solidfire)
     - [TLS certificates for OS and containers](#tls-certificates-for-os-and-containers)
       - [OS/VM level](#osvm-level)
       - [Containers](#containers)
@@ -54,10 +54,10 @@ This isn't a new, SFC-only idea. Various SolidFire integrations and automation t
 
 ## Quick start
 
-- Create a read- and reporting-only admin account on SolidFire (see in [Security](#security) if you don't know how). If using existing InfluxDB, ask for access to a new `sfc` database. By default InfluxDB v1 allows creation of new databases and SFC automatically creates it if it does not exist, so you don't have to do anything in InfluxDB if you deploy your own using default container settings for InfluxDB OSS v1 - just make sure it's running and reachable by SFC
+- Create a read- and reporting-only admin account on SolidFire (see in [Security](#security) if you don't know how). If using existing InfluxDB, ask for access to a new `sfc` database. By default InfluxDB v1 allows creation of new databases and SFC automatically creates it if it does not exist, so you don't have to do anything in InfluxDB if you deploy your own using default container settings for InfluxDB OSS v1 - just make sure it's running and reachable by SFC. If InflxuDB is set to not allow database creation, then SFC will err as database won't be created and sending metrics to a non-existing database [doesn't work](https://docs.influxdata.com/influxdb/v1/guides/write_data/#writing-a-point-to-a-database-that-doesnt-exist)
 - SFC:
-  - Non-containerized: install SFC's dependencies with Python pip (see requirements.txt), make sure TLS certificate on SolidFire is accepted (use curl or something) and run `sfc.py -h`.
-  - Containerized: set variables (MVIP, USERNAME, etc.) in YAML or env var or file and deploy. **If your SolidFire does not have a valid TLS certificate**, you will need to copy it into the container to be visible to Python. Refer to generic Python-in-Docker instructions.
+  - Non-containerized (easier): install SFC's dependencies with Python pip (see requirements.txt), make sure TLS certificate on SolidFire is accepted (use curl or something to check) and run `sfc.py -h`.
+  - Containerized (harder): set variables (MVIP, USERNAME, etc.) in YAML or env var or file and deploy. **If your SolidFire does not have a valid TLS certificate**, you will need to copy it into the container to be visible to Python. Refer to generic Python-in-Docker instructions.
 - See [dashboards.md](./docs/dashboards.md) about visualization and metrics.
 
 
@@ -133,9 +133,14 @@ Because SFC container built by *me* does not have *your* internal certificate or
 ## Alternatives to SFC
 
 - [SolidFire Exporter](https://github.com/mjavier2k/solidfire-exporter/) - Prometheus exporter
+  - Exports "general" SolidFire metrics with (currently) a single schedule for all, potentially may not scale as well as SFC v2
   - [Getting started with SolidFire Exporter](https://scaleoutsean.github.io/2021/03/09/get-started-with-solidfire-exporter.html)
-- SolidFire syslog forwarding to Elasticsearch or similar platform (detailed [steps](https://scaleoutsean.github.io/2021/10/18/solidfire-syslog-filebeat-logstash-elk-stack.html))
-- NetApp Cloud Insights (as-a-service which is free up to 7 day retention and paid above that)
+- SolidFire syslog forwarding to Elasticsearch or similar platform 
+  - Detailed [steps](https://scaleoutsean.github.io/2021/10/18/solidfire-syslog-filebeat-logstash-elk-stack.html)
+  - Requires more work to set up, but provides a path to both log and metrics collection
+- NetApp Cloud Insights
+  - As-a-service offering free up to 7 day retention and paid above that
+  - Control plane in the cloud, basic metrics, no customization options
 
 
 ## FAQs
@@ -173,9 +178,9 @@ Grafana has to be user-provided and dashboards created once InfluxDB is added as
 - 3rd party containers and packages
   - Upstream containers (SFC base image, InfluxDB) are not audited or regularly checked for vulnerabilities by me. SFC doesn't run any external-facing service and InfluxDB is only accessed by Grafana. But feel free to inspect/update them on your own and use your own Influx and Grafana instances. SFC is built with fairly minimal dependencies, so that users can address vulnerabilities in 3rd party packages on their own
 
-### How to upload TLS certificate to SolidFire
+### How to upload your TLS certificate to SolidFire
 
-See this post on [how to upload TLS certificate to SolidFire using Postman](https://scaleoutsean.github.io/2020/11/24/scary-bs-postman-ssl-certs.html). The same can be done via the API or from SolidFire PowerShell Tools. It takes 5 minutes!
+See this post on [how to upload a TLS certificate to SolidFire using Postman](https://scaleoutsean.github.io/2020/11/24/scary-bs-postman-ssl-certs.html). The same can be done via the API or from SolidFire PowerShell Tools. It takes 5 minutes.
 
 Optionally use a secure HTTPS reverse proxy with a valid certificate.
 
@@ -183,7 +188,7 @@ With SolidFire's certificate chain on the host available to SFC, even a self-sig
 
 ### TLS certificates for OS and containers
 
-This used to be "solved" by accepting whatever, but in 2024 that's no longer good enough. I don't have *your* valid or invalid certificate, so I can't "solve" it in SFC. 
+This used to be "solved" by accepting whatever, but in 2024 that's no longer good enough. I don't have *your* valid or invalid certificate, so I can't "solve" it in SFC for you. 
 
 Python (and by extension, SFC) needs to be able to validate SolidFire's TLS certificate. 
 
@@ -301,8 +306,8 @@ SFC attempts to put and end to that and should be able to handle clusters with 1
   - Volume performance - performance monitoring is one of top use cases
 - Medium and low frequency data: metrics that do not need to be collected every 60 seconds are collected at much higher intervals
   - Everything else including experimental metrics 
-  - **NOTE:** when you build dashboards from these measurements, set dashboard time interval to 60 minutes (or longer) and wait, as you may otherwise see "No data" in Grafana until 61 minutes have passed. Or create two tiered dashboard system (see [dashboards.md](./docs/dashboards.md) for details)
-- Because of different schedules and tasks, any stuck task (e.g. during MVIP failover) will fail on its own while others may fail or succeed on their own. Before a stuck task would stall all metrics gathering
+  - **NOTE:** when you build dashboards from these measurements, set dashboard time interval to 60 minutes (or longer) and wait, as you may otherwise see "No data" in Grafana until 61 minutes have passed. Or create a two tiered dashboard system (see [dashboards.md](./docs/dashboards.md) for details)
+- Because of different schedules and tasks, any stuck task (e.g. during MVIP failover) will fail on its own while others may fail or succeed on their own. Before (HCI Collector) a stuck task would stall all metrics gathering
 
 
 ## Dependencies 
@@ -315,7 +320,6 @@ Compared to previous version (HCI Collector v0.7), two top-level external librar
 ## History of SFC
 
 I started contributing in 2019 and took over as the sole maintainer before v0.7.
-
 
 - I took over before v0.7, released v0.7 and two security and compatibility updates. The main components used in HCI Collector during that time (up to HCI Collector v0.7.2) were as follows:
 - [HCI Collector](https://github.com/jedimt/hcicollector/) from the period before I took over expanded scope 

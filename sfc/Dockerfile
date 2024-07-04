@@ -9,4 +9,9 @@ RUN chmod 644 /usr/local/share/ca-certificates/prod.crt && update-ca-certificate
 
 COPY sfc.py /sfc.py
 ENTRYPOINT [ "python" , "/sfc.py" ]
-# docker run --name=sfc sfc:v2.0.0 -h
+
+# Alternative Alpine approaches: https://stackoverflow.com/questions/67231714/how-to-add-trusted-root-ca-to-docker-alpine
+# ADD my-cert.pem /usr/local/share/ca-certificates/my-cert.crt
+# RUN cat /usr/local/share/ca-certificates/my-cert.crt >> /etc/ssl/certs/ca-certificates.crt 
+
+# How to run from your repo: docker run --name=sfc sfc:v2.0.0 -h

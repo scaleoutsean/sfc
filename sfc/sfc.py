@@ -28,7 +28,9 @@ import logging
 import logging.handlers
 from logging.handlers import RotatingFileHandler
 from logging.handlers import QueueHandler
+import json
 import os
+import platform
 import random
 import re
 import sys
@@ -77,9 +79,9 @@ async def volumes(session, **kwargs):
     """
     time_start = round(time.time(), 3)
     function_name = 'volumes'
-    # NOTE: the volumeID pair is out of order because it maps to 'id' which
-    # *is* in proper order. We have two sets of tags depending if the volume is
-    # paired
+    # NOTE: the volumeID pair is out of alphanumeric order because it maps to
+    # 'id' which *is* in proper order. We have two sets of tags/fields depending if
+    # the volume is paired
     tags_non_paired = [
         ('access',
          'access'),
@@ -139,7 +141,7 @@ async def volumes(session, **kwargs):
         ('qosPolicyID',
          'qos_policy_id'),
         ('remote_replication_mode',
-         'remote_replication_mode'),        
+         'remote_replication_mode'),
         ('remote_replication_state',
          'remote_replication_state'),
         ('remote_replication_snap_state',
@@ -174,7 +176,7 @@ async def volumes(session, **kwargs):
         volumes = ''
         for volume in result:
             single_volume = "volumes,cluster=" + CLUSTER_NAME + ","
-            # NOTE: this needs to be an integer in InfluxDB, None won't work
+            # NOTE: this needs to be an integer in InfluxDB. None won't work
             if (volume['qosPolicyID'] is None):
                 volume['qosPolicyID'] = 0
             # NOTE: this section gathers volume pairing information when
@@ -182,31 +184,29 @@ async def volumes(session, **kwargs):
             volume_paired = False
             if volume['volumePairs'] != []:
                 volume_pairs = volume['volumePairs']
-                logging.debug(
-                    "Volume pairs (volume['volumePairs']) for volume ID: " + str(
-                        volume['volumeID']) + ": " + str(volume_pairs))
-                logging.debug('Volume replication enabled for volume ' +
-                              str(volume['volumeID']) +
-                              '. Calling extract_volume_pair().')
                 vp = await extract_volume_pair(volume_pairs)
-                logging.debug(
-                    'VP returned from extract_volume_pair: ' + str(vp))
+                if args.loglevel == 'DEBUG':
+                    logging.debug(
+                        'VP returned from extract_volume_pair: ' + str(vp))
                 if vp != {}:
                     try:
                         for k in vp:
                             volume[k] = vp[k]
                         vp = {}
                         volume_paired = True
-                        logging.debug(
-                            'Volume pair information obtained, extracted and added to volume ' + str(
-                                volume['volumeID']) + '.')
+                        if args.loglevel == 'DEBUG':
+                            logging.debug(
+                                'Volume pair information obtained, extracted and added to volume ' + str(
+                                    volume['volumeID']) + '.')
                     except BaseException:
                         logging.error(
                             'Volume pair information not obtained for volume could not be added to ' + str(
                                 volume['volumeID']) + ' key.')
+                        return
                 else:
                     logging.error('Volume pair information not returned for volume ' +
                                   str(volume['volumeID']) + ' by extract_volume_pair().')
+                    return
             else:
                 logging.debug(
                     'Volume replication not enabled for volume ' + str(volume['volumeID']) + '.')
@@ -214,15 +214,9 @@ async def volumes(session, **kwargs):
             if volume_paired == True:
                 tags = tags_paired
                 fields = fields_paired
-                logging.debug('Volume ' +
-                              str(volume['volumeID']) +
-                              ' is paired, using paired tags and fields.')
             else:
                 tags = tags_non_paired
                 fields = fields_non_paired
-                logging.debug('Volume ' +
-                              str(volume['volumeID']) +
-                              ' is not paired, using non-paired tags and fields.')
             for tag in tags:
                 k = tag[0]
                 nk = tag[1]
@@ -233,22 +227,56 @@ async def volumes(session, **kwargs):
                 else:
                     single_volume = single_volume + kv + " "
                 if volume_paired == True:
-                    logging.debug("single_volume tags for volume + " +
-                                  str(volume['volumeID']) + ": " + str(single_volume))
+                    if args.loglevel == 'DEBUG':
+                        logging.debug("single_volume tags for volume " +
+                                      str(volume['volumeID']) + ": " + str(single_volume))
+
+            # NOTE: this is kind of out of place, but we need to check and add
+            # KV if volume has non-empty attributes
+            if volume['attributes'] != {}:
+                if args.loglevel == 'DEBUG':
+                    logging.debug('Volume ' +
+                                  str(volume['volumeID']) +
+                                  ' has non-empty attributes.')
+                try:
+                    vol_attr_fields = await extract_trident_volume_attributes(volume['attributes'])
+                    if vol_attr_fields != '':
+                        single_volume = single_volume + vol_attr_fields + ","
+                        if args.loglevel == 'DEBUG':
+                            logging.debug(
+                                'Volume attributes parsed and added:\n ' +
+                                str(vol_attr_fields) +
+                                '.')
+                    else:
+                        logging.info(
+                            'Volume ' +
+                            str(
+                                volume['volumeID']) +
+                            ' has no attributes that match Trident attributes currently parsed by SFC. Not adding any attributes to volume fields.')
+                except Exception as e:
+                    logging.error(
+                        'Error while extracting Trident volume attributes: ' + str(e) + '.')
+                    pass
+            else:
+                if args.loglevel == 'DEBUG':
+                    logging.debug('No attributes found for volume ' +
+                                  str(volume['volumeID']) + '.')
+
             for field in fields:
                 k = field[0]
                 nk = field[1]
                 val = volume[k]
-                val = str(val) + "i"                
+                val = str(val) + "i"
                 kv = nk + "=" + val
                 if k in [x[0] for x in fields[0:-1]]:
                     single_volume = single_volume + kv + ","
                 else:
                     single_volume = single_volume + kv + " "
                 if volume_paired == True:
-                    logging.debug("single_volume tags for volume + " +
-                                  str(volume['volumeID']) + ": " + str(single_volume))
-            volumes = volumes + single_volume + "\n"            
+                    if args.loglevel == 'DEBUG':
+                        logging.debug("single_volume tags for volume + " +
+                                      str(volume['volumeID']) + ": " + str(single_volume))
+            volumes = volumes + single_volume + "\n"
         await send_to_influx(volumes)
     elif kwargs.keys() == {'names'} or kwargs.keys() == {'names_dict'}:
         for key in kwargs:
@@ -280,10 +308,11 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
     Currently only the first paired volume is processed. Additional volumes and values may be added in the future.
     """
     time_start = round(time.time(), 3)
-    function_name = 'extract_volume_pair' 
+    function_name = 'extract_volume_pair'
     vp = {}
     if volume_pairs == [] or len(volume_pairs) > 1:
-        logging.debug('volume_pairs list ' + str(volume_pairs) + '.')
+        if args.loglevel == 'DEBUG':
+            logging.debug('volume_pairs list ' + str(volume_pairs) + '.')
         logging.warning(
             'Volume pairs list is empty or has more than one pair, which is currently not implemented. Returning.')
         return {}
@@ -306,24 +335,72 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
         try:
             # NOTE: this order (Async/Sync/SnapshotsOnly) is based on the SolidFire UI.
             # Numbering starts from 1 as 0 seems suitable for non-paired
-            # volumes. Unknown is set to 100 to leave room for existing states not yet here.
-            
-            mode_map = [('Async', 1), ('Sync', 2), ('SnapshotsOnly', 3), ('None', 100)]
-            mode = vp_dict['remoteReplication']['mode'] if vp_dict['remoteReplication']['mode'] in [x[0] for x in mode_map] else 'None'
-            vp['remote_replication_mode'] = next((x[1] for x in mode_map if x[0] == mode), None)            
-
+            # volumes. Unknown is set to 100 to leave room for existing states
+            # not yet here.
+            mode_map = [('Async', 1), ('Sync', 2),
+                        ('SnapshotsOnly', 3), ('None', 100)]
+            mode = vp_dict['remoteReplication']['mode'] if vp_dict['remoteReplication']['mode'] in [
+                x[0] for x in mode_map] else 'None'
+            vp['remote_replication_mode'] = next(
+                (x[1] for x in mode_map if x[0] == mode), None)
             # NOTE: one option is to change these into Pythonic snake case, and deal with it in Grafana
-            # and another is to simply use integers for the states and assign 100 to unseen and unknown 
-            # Source of state keys: NetApp TR-4741 (2020), page 26, and observation on SF Demo VM 12.5
-
-            rep_state_map = [('Active', 1), ('Idle', 2), ('PausedDisconnected', 3), ('PausedManual', 4), ('PausedDisconnected', 5), ('PausedManualRemote', 6), ('ResumingConnected', 7), ('ResumingDataTransfer', 8), ('ResumingLocalSync', 9), ('ResumingRRSync', 10), ('None', 100)]
-            rep_state_mode = vp_dict['remoteReplication']['state'] if vp_dict['remoteReplication']['state'] in [x[0] for x in rep_state_map] else 'None'
-            vp['remote_replication_state'] =  next((x[1] for x in rep_state_map if x[0] == rep_state_mode), None)
-            
-            snap_state_map = [('Active', 1), ('Idle', 2), ('PausedDisconnected', 3), ('PausedManual', 4), ('PausedDisconnected', 5), ('PausedManualRemote', 6), ('ResumingConnected', 7), ('ResumingDataTransfer', 8), ('ResumingLocalSync', 9), ('ResumingRRSync', 10), ('None', 100)]
-            snap_state_mode = vp_dict['remoteReplication']['snapshotReplication']['state'] if vp_dict['remoteReplication']['snapshotReplication']['state'] in [x[0] for x in snap_state_map] else 'None'
-            vp['remote_replication_snap_state'] = next((x[1] for x in snap_state_map if x[0] == snap_state_mode), None)
-                
+            # and another is to simply use integers for the states and assign 100 to unseen and unknown
+            # Source of state keys: NetApp TR-4741 (2020), page 26, and
+            # observation on SF Demo VM 12.5
+            rep_state_map = [
+                ('Active',
+                 1),
+                ('Idle',
+                 2),
+                ('PausedDisconnected',
+                 3),
+                ('PausedManual',
+                 4),
+                ('PausedDisconnected',
+                 5),
+                ('PausedManualRemote',
+                 6),
+                ('ResumingConnected',
+                 7),
+                ('ResumingDataTransfer',
+                 8),
+                ('ResumingLocalSync',
+                 9),
+                ('ResumingRRSync',
+                 10),
+                ('None',
+                 100)]
+            rep_state_mode = vp_dict['remoteReplication']['state'] if vp_dict['remoteReplication']['state'] in [
+                x[0] for x in rep_state_map] else 'None'
+            vp['remote_replication_state'] = next(
+                (x[1] for x in rep_state_map if x[0] == rep_state_mode), None)
+            snap_state_map = [
+                ('Active',
+                 1),
+                ('Idle',
+                 2),
+                ('PausedDisconnected',
+                 3),
+                ('PausedManual',
+                 4),
+                ('PausedDisconnected',
+                 5),
+                ('PausedManualRemote',
+                 6),
+                ('ResumingConnected',
+                 7),
+                ('ResumingDataTransfer',
+                 8),
+                ('ResumingLocalSync',
+                 9),
+                ('ResumingRRSync',
+                 10),
+                ('None',
+                 100)]
+            snap_state_mode = vp_dict['remoteReplication']['snapshotReplication']['state'] if vp_dict['remoteReplication']['snapshotReplication']['state'] in [
+                x[0] for x in snap_state_map] else 'None'
+            vp['remote_replication_snap_state'] = next(
+                (x[1] for x in snap_state_map if x[0] == snap_state_mode), None)
         except KeyError as e:
             logging.warning(
                 'KeyError while parsing remoteReplication dictionary: ' + str(e))
@@ -337,6 +414,56 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
         ' seconds.')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     return vp
+
+
+async def extract_trident_volume_attributes(vol_attr: dict) -> str:
+    """
+    Extracts volume attributes from the volume dictionary and returns a list of KV strings ready for addition to volume fields.
+    """
+    volume_attributes = [
+        ('docker-name', 'va_docker_name'),
+        ('fstype', 'va_fstype'),
+        ('provisioning', 'va_provisioning'),
+        ('version', 'va_trident_version'),
+        ('backendUUID', 'va_trident_backend_uuid'),
+        ('platform', 'va_trident_platform'),
+        ('platformVersion', 'va_trident_platform_version'),
+        ('plugin', 'va_trident_plugin')
+    ]
+    v_attrs = vol_attr.keys()
+    if 'docker-name' in v_attrs and 'fstype' in v_attrs and 'provisioning' in v_attrs and 'trident' in v_attrs:
+        v_attrs_dict = {}
+        for k in v_attrs:
+            for va_pair in volume_attributes:
+                if k == va_pair[0]:
+                    # NOTE: provisioning seems to be always empty in SF attributes
+                    # as Trident seems to be using thin|thick for ONTAP; SF is
+                    # always thin-provisioned
+                    if k == 'provisioning' and vol_attr[k] == '':
+                        v_attrs_dict[va_pair[1]] = 'thin'
+                    elif k == 'provisioning' and vol_attr[k] != '':
+                        v_attrs_dict[va_pair[1]] = vol_attr[k]
+                    else:
+                        v_attrs_dict[va_pair[1]] = vol_attr[k]
+                elif k == 'trident':
+                    trident_dict = json.loads(vol_attr[k])
+                    for trident_key in trident_dict.keys():
+                        if trident_key == va_pair[0]:
+                            v_attrs_dict[va_pair[1]
+                                         ] = trident_dict[trident_key]
+    else:
+        logging.info(
+            'Non-Trident attributes found in volume attributes: ' +
+            str(vol_attr) +
+            '. Skipping.')
+        return ''
+    if args.loglevel == 'DEBUG':
+        logging.debug(
+            'Volume attributes extracted:\n' +
+            str(v_attrs_dict) +
+            '.')
+    return (','.join([f'{k}="{v}"' for k, v in v_attrs_dict.items()]))
+
 
 async def sync_jobs(session):
     """
@@ -354,20 +481,29 @@ async def sync_jobs(session):
     if args.loglevel == 'DEBUG':
         logging.debug('Sync jobs result: ' + str(result) + '.')
     if result == []:
-        logging.debug('No sync jobs found. Returning.')
+        logging.info('No sync jobs found. Returning.')
         return
     else:
         # NOTE: there are different kinds of jobs (clone, remote replication, slice synchronization)
-        # Ech has unique tags and fields
+        # Each has unique tags and fields
         # See https://docs.netapp.com/us-en/element-software/api/reference_element_api_syncjob.html
         # type: one of clone slice block remote
-        tags = [('dstVolumeID', 'dst_volume_id'), ('stage', 'stage'), ('type', 'type')]
-        fields = [('blocksPerSecond', 'blocks_per_sec'), ('elapsedTime', 'elapsed_time'), ('percentComplete', 'pct_complete'), ('remainingTime', 'remaining_time')]
+        tags = [('dstVolumeID', 'dst_volume_id'),
+                ('stage', 'stage'), ('type', 'type')]
+        fields = [
+            ('blocksPerSecond',
+             'blocks_per_sec'),
+            ('elapsedTime',
+             'elapsed_time'),
+            ('percentComplete',
+             'pct_complete'),
+            ('remainingTime',
+             'remaining_time')]
         sync_jobs = ''
         for i in result:
-            # NOTE: this is a single sync job of 'remote' type. Until we get API examples with real-life data, other types will be discarded
+            # NOTE: this is a single sync job of 'remote' type. Until we get
+            # API examples with real-life data, other types will be discarded
             if i['type'] == 'remote':
-                logging.info('Processing remote sync job with ID ' + str(i['dstVolumeID']) + '.')
                 single_sync_job = "sync_jobs,cluster=" + CLUSTER_NAME + ","
                 for tag in tags:
                     k = tag[0]
@@ -382,17 +518,19 @@ async def sync_jobs(session):
                     k = field[0]
                     nk = field[1]
                     val = i[k]
-                    # NOTE: contrary to the docs, blocks_per_sec seems to be an integer 
-                    # NOTE: https://github.com/NetAppDocs/element-software/issues/204
-                    if nk in ['blocks_per_sec', 'elapsed_time', 'pct_complete']: 
+                    # NOTE: contrary to the docs, blocks_per_sec seems to be an integer
+                    # https://github.com/NetAppDocs/element-software/issues/204
+                    if nk in ['blocks_per_sec',
+                              'elapsed_time', 'pct_complete']:
                         val = str(val) + "i"
                     elif nk == 'remaining_time':
-                        # NOTE: Uhm, yeah. It's possible.                        
-                        if val == None:
+                        # NOTE: Uhm, yeah. It's possible.
+                        if val is None:
                             val = "0"
-                    # NOTE: looks like an API bug, remaining_time is a float
-                    else:    
-                        val = str(val) 
+                    # NOTE: looks like another API documentation bug,
+                    # remaining_time is a float
+                    else:
+                        val = str(val)
                     kv = nk + "=" + val
                     if k in [x[0] for x in fields[0:-1]]:
                         single_sync_job = single_sync_job + kv + ","
@@ -400,18 +538,24 @@ async def sync_jobs(session):
                         single_sync_job = single_sync_job + kv + " "
                 sync_jobs = sync_jobs + single_sync_job + "\n"
             else:
-                logging.debug('Sync job type ' + str(i['type']) + ' is not yet supported. You may submit this record to have it considered for inclusion in SFC. Skipping.')
+                if args.loglevel == 'DEBUG':
+                    logging.debug(
+                        'Sync job type ' +
+                        str(
+                            i['type']) +
+                        ' is not yet supported. You may submit this record to have it considered for inclusion in SFC. Skipping.')
                 logging.info('Skipped sync job: ' + str(i))
     await send_to_influx(sync_jobs)
     time_taken = (round(time.time(), 3) - time_start)
     if args.loglevel == 'DEBUG':
-        logging.debug('Sync jobs payload:\n' + str(sync_jobs) + '.')
+        logging.debug('Sync jobs payload:\n ' + str(sync_jobs) + '.')
     logging.info(
         'Sync jobs obtained and sent in ' +
         str(time_taken) +
         ' seconds.')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     return
+
 
 async def volume_performance(session, **kwargs):
     """
@@ -424,57 +568,92 @@ async def volume_performance(session, **kwargs):
     try:
         all_volumes = await volumes(session, names=True)
         isinstance(all_volumes, list)
-        logging.debug('Volume information obtained and is a list of ' +
-                      str(len(all_volumes)) + ' elements.')
+        if args.loglevel == 'DEBUG':
+            logging.debug('Volume information obtained and is a list of ' +
+                          str(len(all_volumes)) + ' elements.')
     except Exception as e:
         logging.error(
             'Volume information not obtained or malformed. Returning.')
         logging.error(e)
         return
-    fields = [('actualIOPS', 'actual_iops'), ('averageIOPSize', 'average_io_size'), ('asyncDelay', 'async_delay'), ('burstIOPSCredit', 'burst_io_credit'), ('clientQueueDepth', 'client_queue_depth'), ('latencyUSec', 'latency_usec'), ('nonZeroBlocks', 'non_zero_blocks'),
-              ('normalizedIOPS', 'normalized_iops'), ('readBytes', 'read_bytes'), ('readBytesLastSample', 'read_bytes_last_sample'), ('readLatencyUSec',
-                                                                                                                                      'read_latency_usec'), ('readOpsLastSample', 'read_ops_last_sample'), ('throttle', 'throttle'), ('volumeSize', 'volume_size'),
-              ('volumeUtilization', 'volume_utilization'), ('writeBytes', 'write_bytes'), ('writeBytesLastSample', 'write_bytes_last_sample'), ('writeLatencyUSec', 'write_latency_usec'), ('writeOpsLastSample', 'write_ops_last_sample'), ('zeroBlocks', 'zero_blocks')]    
+    fields = [('actualIOPS', 'actual_iops'),
+              ('averageIOPSize', 'average_io_size'),
+              ('asyncDelay', 'async_delay'),
+              ('burstIOPSCredit', 'burst_io_credit'),
+              ('clientQueueDepth', 'client_queue_depth'),
+              ('latencyUSec', 'latency_usec'),
+              ('nonZeroBlocks', 'non_zero_blocks'),
+              ('normalizedIOPS', 'normalized_iops'),
+              ('readBytes', 'read_bytes'),
+              ('readBytesLastSample', 'read_bytes_last_sample'),
+              ('readLatencyUSec', 'read_latency_usec'),
+              ('readOpsLastSample', 'read_ops_last_sample'),
+              ('throttle', 'throttle'),
+              ('volumeSize', 'volume_size'),
+              ('volumeUtilization', 'volume_utilization'),
+              ('writeBytes', 'write_bytes'),
+              ('writeBytesLastSample', 'write_bytes_last_sample'),
+              ('writeLatencyUSec', 'write_latency_usec'),
+              ('writeOpsLastSample', 'write_ops_last_sample'),
+              ('zeroBlocks', 'zero_blocks')
+              ]
     if len(all_volumes) > CHUNK_SIZE:
-        logging.info('Splitting volumes list with length ' +
-                     str(len(all_volumes)) + ' using chunk size ' + str(CHUNK_SIZE) + '.')
+        if args.loglevel == 'DEBUG':
+            logging.debug('Splitting volumes list with length ' +
+                          str(len(all_volumes)) + ' using chunk size ' + str(CHUNK_SIZE) + '.')
         volume_lists = await _split_list(all_volumes)
     else:
         volume_lists = []
-        volume_lists.append(all_volumes)    
-    
+        volume_lists.append(all_volumes)
+
     volumes_performance = ''
     b = 0
     for volume_batch in volume_lists:
-        logging.info('Processing volume batch ' + str(b) + ' with ' +
-                     str(len(volume_batch)) + ' volumes.')
+        if args.loglevel == 'DEBUG':
+            logging.info('Processing volume batch ' + str(b) + ' with ' +
+                         str(len(volume_batch)) + ' volumes.')
         volume_batch_ids = [x[0] for x in volume_batch]
-        logging.info("Volume batch IDs:\n" + str(volume_batch_ids) + ".")
+        if args.loglevel == 'DEBUG':
+            logging.info("Volume batch IDs:\n" + str(volume_batch_ids) + ".")
         api_payload = "{ \"method\": \"ListVolumeStats\", \"params\": { \"volumeIDs\": " + \
             str(volume_batch_ids) + "}}"
-        # logging.debug("API payload for volume stats:\n" + str(api_payload) + ".")
         async with session.post(SF_POST_URL, data=api_payload) as response:
             r = await response.json()
         result = r['result']['volumeStats']
         # NOTE: we need to convert the asyncDelay from null to integer or parse the string to seconds:int
         # NOTE: asyncDelay is a string like "00:00:01.123456" (1.1s)
-        async_delay_pattern = re.compile('\d{2}:\d{2}:\d{2}.\d{5}')
+        async_delay_pattern = re.compile('\\d{2}:\\d{2}:\\d{2}.\\d{5}')
         for volume in result:
-            # logging.debug('Processing volume ' + str(volume['volumeID']) + '. Data: ' + str(volume) + '.')
-            if volume['asyncDelay'] != None:
-                # logging.debug('Volume has non-null asyncDelay. Converting to seconds for volume ' + str(volume['volumeID']) + '.')                        
-                try: 
+            if volume['asyncDelay'] is not None:
+                try:
                     if async_delay_pattern.match(volume['asyncDelay']):
-                        async_delay_tp = datetime.datetime.strptime(volume['asyncDelay'],"%H:%M:%S.%f")
-                        volume['asyncDelay'] = async_delay_tp.hour * 3600 + async_delay_tp.minute * 60 + async_delay_tp.second
-                        # logging.debug('Converted asyncDelay to seconds for volume ' + str(volume['volumeID']) + ': ' + str(volume['asyncDelay']) + '.')
+                        async_delay_tp = datetime.datetime.strptime(
+                            volume['asyncDelay'], "%H:%M:%S.%f")
+                        volume['asyncDelay'] = async_delay_tp.hour * 3600 + \
+                            async_delay_tp.minute * 60 + async_delay_tp.second
                 except TypeError as e:
-                    logging.error('Failed to convert asyncDelay text string to seconds (int) for volume ' + str(volume['volumeID']) + '. Problem string: ' + str(volume['asyncDelay']) + '. Setting to -1 to surface in Grafana. Error: ' + str(e) + '.')
+                    logging.error(
+                        'Failed to convert asyncDelay text string to seconds (int) for volume ' +
+                        str(
+                            volume['volumeID']) +
+                        '. Problem string: ' +
+                        str(
+                            volume['asyncDelay']) +
+                        '. Setting to -1 to surface in Grafana. Error: ' +
+                        str(e) +
+                        '.')
                     volume['asyncDelay'] = int(-1)
             else:
-                logging.debug('Volume has null asyncDelay. Setting it to -1 for volume ' + str(volume['volumeID']) + '.')
+                if args.loglevel == 'DEBUG':
+                    logging.debug(
+                        'Volume has null asyncDelay. Setting it to -1 for volume ' + str(volume['volumeID']) + '.')
                 volume['asyncDelay'] = -1
-            # logging.debug('Processed volume ' + str(volume['volumeID']) + '. Data: ' + str(volume) + '.')
+            if args.loglevel == 'DEBUG':
+                logging.debug('Processed volume ' +
+                              str(volume['volumeID']) +
+                              '. Data: ' +
+                              str(volume) +
+                              '.')
         volume_performance = ''
         for volume in result:
             volume_line = ''
@@ -484,7 +663,7 @@ async def volume_performance(session, **kwargs):
                     kv_list = ''
                     for field in fields:
                         k = field[0]
-                        nk = field[1]                        
+                        nk = field[1]
                         val = volume[k]
                         if isinstance(
                                 val, float) or k == 'throttle' or k == 'volumeUtilization':
@@ -499,17 +678,18 @@ async def volume_performance(session, **kwargs):
                     volume_line = "volume_performance,cluster=" + CLUSTER_NAME + ",id=" + \
                         str(volume['volumeID']) + ",name=" + \
                         volume_name + " " + kv_list
-            ts = str(int(round(time.time(),0))) # NOTE: timestamp for the record
+            # NOTE: timestamp for the record
+            ts = str(int(round(time.time(), 0)))
             volume_performance = volume_performance + volume_line + ts + "\n"
-            # logging.debug('Volume performance line for volume ID ' + str(volume['volumeID']) + ':\n' + str(volume_line))
         b = b + 1
         volumes_performance = volumes_performance + volume_performance
-        # logging.debug('Volume performance batch for batch item ' + str(b) + ':\n' + str(volume_performance))
     await send_to_influx(volumes_performance)
     time_taken = (round(time.time(), 3) - time_start)
     if args.loglevel == 'DEBUG':
-        logging.debug("Volume performance payload:\n" + str(volumes_performance))
-    logging.info('Volume performance gathered in ' +
+        logging.debug(
+            "Volume performance payload:\n" +
+            str(volumes_performance))
+    logging.info('Volume performance collected in ' +
                  str(time_taken) + ' seconds')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     return
@@ -544,7 +724,7 @@ async def accounts(session):
             account_active = "1"
         else:
             account_active = "0"
-        accounts = accounts + "accounts,id=" + str(account['accountID']) + ",name=" + str(
+        accounts = accounts + "accounts,cluster=" + CLUSTER_NAME + ",id=" + str(account['accountID']) + ",name=" + str(
             account['username']) + " " + "active=" + account_active + "i" + ",volume_count=" + volume_count + "i" + "\n"
     await send_to_influx(accounts)
     time_taken = (round(time.time(), 3) - time_start)
@@ -562,7 +742,7 @@ async def account_efficiency(session):
     """
     function_name = 'account_efficiency'
     time_start = round(time.time(), 3)
-    account_efficiency = ''
+    account_efficiency = '#account_efficiency\n'
     api_payload = "{ \"method\": \"ListAccounts\", \"params\": {}}"
     async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
@@ -583,18 +763,20 @@ async def account_efficiency(session):
             str(account[0]) + " }}"
         async with session.post(SF_POST_URL, data=api_payload) as response:
             r = await response.json()
-            compression = round(r['result']['compression'], 2)
-            deduplication = round(r['result']['deduplication'], 2)
-            thin_provisioning = round(r['result']['thinProvisioning'], 2)
-            storage_efficiency = round((compression * deduplication), 2)
-            account_id_efficiency = "account_efficiency,id=" + str(account[0]) + ",name=" + str(account[1]) + " " + "compression=" + str(
-                compression) + ",deduplication=" + str(deduplication) + ",storage_efficiency=" + str(storage_efficiency) + ",thin_provisioning=" + str(thin_provisioning) + "\n"
-            account_efficiency = account_efficiency + account_id_efficiency
+        compression = round(r['result']['compression'], 2)
+        deduplication = round(r['result']['deduplication'], 2)
+        thin_provisioning = round(r['result']['thinProvisioning'], 2)
+        storage_efficiency = round((compression * deduplication), 2)
+        account_id_efficiency = "account_efficiency,cluster=" + CLUSTER_NAME + ",id=" + str(account[0]) + ",name=" + str(account[1]) + " " + "compression=" + str(
+            compression) + ",deduplication=" + str(deduplication) + ",storage_efficiency=" + str(storage_efficiency) + ",thin_provisioning=" + str(thin_provisioning) + "\n"
+        account_efficiency = account_efficiency + account_id_efficiency
     time_taken = (round(time.time(), 3) - time_start)
     logging.info('Account efficiency collected in ' +
                  str(time_taken) + ' seconds.')
     if args.loglevel == 'DEBUG':
-        logging.debug("Account efficiency payload: " + str(account_efficiency))
+        logging.debug(
+            "Account efficiency payload:\n" +
+            str(account_efficiency))
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     await send_to_influx(account_efficiency)
     return
@@ -605,8 +787,8 @@ async def volume_efficiency(session):
     Use ListVolumes, GetVolumeEfficiency to gather volume efficiency and submit to InfluxDB.
     """
     function_name = 'volume_efficiency'
+    volume_efficiency = "#volume_efficiency\n"
     time_start = round(time.time(), 3)
-    volume_efficiency = ''
     api_payload = "{ \"method\": \"ListVolumes\", \"params\": {}}"
     async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
@@ -625,15 +807,16 @@ async def volume_efficiency(session):
                 storage_efficiency = round(
                     r['result']['deduplication'] * r['result']['compression'], 2)
                 thin_provisioning = round(r['result']['thinProvisioning'], 2)
-                volume_id_efficiency = "volume_efficiency,id=" + str(volume[0]) + ",name=" + str(volume[1]) + " " + "compression=" + str(compression) + ",deduplication=" + str(
+                volume_id_efficiency = "volume_efficiency,cluster=" + CLUSTER_NAME + ",id=" + str(volume[0]) + ",name=" + str(volume[1]) + " " + "compression=" + str(compression) + ",deduplication=" + str(
                     deduplication) + ",storage_efficiency=" + str(storage_efficiency) + ",thin_provisioning=" + str(thin_provisioning) + "\n"
                 volume_efficiency = volume_efficiency + volume_id_efficiency
                 await send_to_influx(volume_efficiency)
+
+    time_taken = (round(time.time(), 3) - time_start)
     if args.loglevel == 'DEBUG':
         logging.debug("Volume efficiency payload: " + str(volume_efficiency))
-        logging.info('Volume efficiency collected in ' +
-                     str(time_taken) + ' seconds.')
-    time_taken = (round(time.time(), 3) - time_start)
+    logging.info('Volume efficiency collected in ' +
+                 str(time_taken) + ' seconds.')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     return
 
@@ -654,10 +837,11 @@ async def cluster_faults(session):
     if group['critical'] > 0 or group['error'] > 0 or group['warning'] > 0 or group['bestPractices'] > 0:
         faults_total = str(
             group['critical'] + group['error'] + group['warning'] + group['bestPractices'])
-        cluster_faults = "cluster_faults,total=" + faults_total + " " + "critical=" + str(group['critical']) + "i" + ",error=" + str(
+        cluster_faults = "cluster_faults,cluster=" + CLUSTER_NAME + ",total=" + faults_total + " " + "critical=" + str(group['critical']) + "i" + ",error=" + str(
             group['error']) + "i" + ",warning=" + str(group['warning']) + "i" + ",bestPractices=" + str(group['bestPractices']) + "i" + "\n"
     else:
-        cluster_faults = "cluster_faults,total=0 critical=0i,error=0i,warning=0i,bestPractices=0i" + "\n"
+        cluster_faults = "cluster_faults,cluster=" + CLUSTER_NAME + \
+            ",total=0 critical=0i,error=0i,warning=0i,bestPractices=0i" + "\n"
     time_taken = (round(time.time(), 3) - time_start)
     await send_to_influx(cluster_faults)
     logging.info('Cluster faults gathered in ' + str(time_taken) + ' seconds.')
@@ -683,8 +867,9 @@ async def volume_qos_histograms(session):
     try:
         volumes_dict = await volumes(session, names_dict=True)
         isinstance(volumes, dict)
-        logging.debug('ID-volume KV pairs obtained from volumes: ' +
-                      str(len(volumes_dict)) + ' pairs.')
+        if args.loglevel == 'DEBUG':
+            logging.debug('ID-volume KV pairs obtained from volumes: ' +
+                          str(len(volumes_dict)) + ' pairs.')
     except Exception as e:
         logging.error(
             'Volume information not returned by volumes function or response malformed:' + str(volumes_dict))
@@ -699,7 +884,6 @@ async def volume_qos_histograms(session):
         for hg in qosh_batch:
             vol_id_name = (hg['volumeID'], volumes_dict[hg['volumeID']])
             await qos_histogram_processor(hg, vin=vol_id_name)
-    logging.info('QoS histograms collected and sent to InfluxDB.')
     time_taken = (round(time.time(), 3) - time_start)
     logging.info('Volume QoS histograms collected in ' +
                  str(time_taken) + ' seconds.')
@@ -710,28 +894,66 @@ async def volume_qos_histograms(session):
 
 async def qos_histogram_processor(hg, **kwargs):
     """
-    Processes QoS histogram output from volume_qos_histograms function.
+    Processes QoS histogram output from volume_qos_histograms function and sends to InfluxDB.
     """
-    histogram_types = ['belowMinIopsPercentages', 'minToMaxIopsPercentages', 'readBlockSizes',
-                       'targetUtilizationPercentages', 'throttlePercentages', 'writeBlockSizes']
-    histogram_types = [('belowMinIopsPercentages', 'below_min_iops_percentages'), ('minToMaxIopsPercentages', 'min_to_max_iops_percentages'), ('readBlockSizes', 'read_block_sizes'),
-                       ('targetUtilizationPercentages', 'target_utilization_percentage'), ('throttlePercentages', 'throttle_percentages'), ('writeBlockSizes', 'write_block_sizes')]
-    belowMinIopsPercentages = [('Bucket1To19', 'b_01_to_19'), ('Bucket20To39', 'b_20_to_39'), (
-        'Bucket40To59', 'b_40_to_59'), ('Bucket60To79', 'b_60_to_79'), ('Bucket80To100', 'b_80_to_100')]
-    minToMaxIopsPercentages = [('Bucket1To19', 'b_001_to_019'), ('Bucket20To39', 'b_020_to_039'), ('Bucket40To59', 'b_040_to_059'),
-                               ('Bucket60To79', 'b_060_to_079'), ('Bucket80To100', 'b_080_to_100'), ('Bucket101Plus', 'b_101_plus')]
-    readBlockSizes = [('Bucket512To4095', 'b_000512_to_004095'), ('Bucket4096To8191', 'b_004096_to_008191'), ('Bucket8192To16383', 'b_008192_to_016383'), ('Bucket16384To32767',
-                                                                                                                                                           'b_016384_to_032767'), ('Bucket32768To65535', 'b_032768_to_65535'), ('Bucket65536To131071', 'b_065536_to_131071'), ('Bucket131072Plus', 'b_131072_plus')]
-    targetUtilizationPercentages = [('Bucket0', 'b_000'), ('Bucket1To19', 'b_001_to_019'), ('Bucket20To39', 'b_020_to_039'), (
-        'Bucket40To59', 'b_040_to_059'), ('Bucket60To79', 'b_060_079'), ('Bucket80To100', 'b_080_to_100'), ('Bucket101Plus', 'b_101_plus')]
-    throttlePercentages = [('Bucket0', 'b_00'), ('Bucket1To19', 'b_00_to_19'), ('Bucket20To39', 'b_20_to_30'), (
-        'Bucket40To59', 'b_40_to_59'), ('Bucket60To79', 'b_60_to_79'), ('Bucket80To100', 'b_80_to_100')]
-    writeBlockSizes = [('Bucket512To4095', 'b_000512_to_004095'), ('Bucket4096To8191', 'b_004096_to_008191'), ('Bucket8192To16383', 'b_008192_to_016383'), ('Bucket16384To32767',
-                                                                                                                                                            'b_016384_to_032767'), ('Bucket32768To65535', 'b_032768_to_65535'), ('Bucket65536To131071', 'b_065536_to_131071'), ('Bucket131072Plus', 'b_131072_plus')]
+    # histogram_types = ['belowMinIopsPercentages', 'minToMaxIopsPercentages', 'readBlockSizes', 'targetUtilizationPercentages', 'throttlePercentages', 'writeBlockSizes']
+    histogram_types = [('belowMinIopsPercentages', 'below_min_iops_percentages'),
+                       ('minToMaxIopsPercentages', 'min_to_max_iops_percentages'),
+                       ('readBlockSizes', 'read_block_sizes'),
+                       ('targetUtilizationPercentages',
+                        'target_utilization_percentage'),
+                       ('throttlePercentages', 'throttle_percentages'),
+                       ('writeBlockSizes', 'write_block_sizes')
+                       ]
+    belowMinIopsPercentages = [('Bucket1To19', 'b_01_to_19'),
+                               ('Bucket20To39', 'b_20_to_39'),
+                               ('Bucket40To59', 'b_40_to_59'),
+                               ('Bucket60To79', 'b_60_to_79'),
+                               ('Bucket80To100', 'b_80_to_100')
+                               ]
+    minToMaxIopsPercentages = [('Bucket1To19', 'b_001_to_019'),
+                               ('Bucket20To39', 'b_020_to_039'),
+                               ('Bucket40To59', 'b_040_to_059'),
+                               ('Bucket60To79', 'b_060_to_079'),
+                               ('Bucket80To100', 'b_080_to_100'),
+                               ('Bucket101Plus', 'b_101_plus')
+                               ]
+    readBlockSizes = [('Bucket512To4095', 'b_000512_to_004095'),
+                      ('Bucket4096To8191', 'b_004096_to_008191'),
+                      ('Bucket8192To16383', 'b_008192_to_016383'),
+                      ('Bucket16384To32767', 'b_016384_to_032767'),
+                      ('Bucket32768To65535', 'b_032768_to_65535'),
+                      ('Bucket65536To131071', 'b_065536_to_131071'),
+                      ('Bucket131072Plus', 'b_131072_plus')
+                      ]
+    targetUtilizationPercentages = [('Bucket0', 'b_000'),
+                                    ('Bucket1To19', 'b_001_to_019'),
+                                    ('Bucket20To39', 'b_020_to_039'),
+                                    ('Bucket40To59', 'b_040_to_059'),
+                                    ('Bucket60To79', 'b_060_079'),
+                                    ('Bucket80To100', 'b_080_to_100'),
+                                    ('Bucket101Plus', 'b_101_plus')
+                                    ]
+    throttlePercentages = [('Bucket0', 'b_00'),
+                           ('Bucket1To19', 'b_00_to_19'),
+                           ('Bucket20To39', 'b_20_to_30'),
+                           ('Bucket40To59', 'b_40_to_59'),
+                           ('Bucket60To79', 'b_60_to_79'),
+                           ('Bucket80To100', 'b_80_to_100')
+                           ]
+    writeBlockSizes = [('Bucket512To4095', 'b_000512_to_004095'),
+                       ('Bucket4096To8191', 'b_004096_to_008191'),
+                       ('Bucket8192To16383', 'b_008192_to_016383'),
+                       ('Bucket16384To32767', 'b_016384_to_032767'),
+                       ('Bucket32768To65535', 'b_032768_to_65535'),
+                       ('Bucket65536To131071', 'b_065536_to_131071'),
+                       ('Bucket131072Plus', 'b_131072_plus')
+                       ]
     hg_names = (belowMinIopsPercentages, minToMaxIopsPercentages, readBlockSizes,
                 targetUtilizationPercentages, throttlePercentages, writeBlockSizes)
     vol_id_name = kwargs['vin']
     n = 0
+    volume_payload = ''
     for bucket_tuple, histogram_type in zip(hg_names, hg['histograms']):
         volume_kvs_string = "histogram_" + \
             histogram_types[n][1] + ",cluster=" + \
@@ -744,8 +966,16 @@ async def qos_histogram_processor(hg, **kwargs):
         volume_kvs_string = volume_kvs_string + kv_pair + \
             'id=' + str(vol_id_name[0]) + 'i' + '\n'
         volume_kvs_string = volume_kvs_string[:-1]
-        await send_to_influx(volume_kvs_string)
+        if args.loglevel == 'DEBUG':
+            logging.debug(
+                "QoS histogram records (n=" + str(n) + ") for volume " + str(vol_id_name[0]) + ":\n" + str(volume_kvs_string))
+        # await send_to_influx(volume_kvs_string)
+        # logging.info("Sent QoS histogram record (n=" + str(n) + ") for volume " + str(vol_id_name[0]) + ". Data:\n" + str(volume_kvs_string))
+        volume_payload = volume_payload + volume_kvs_string + "\n"
         n = n + 1
+    await send_to_influx(volume_payload)
+    logging.debug("Sent QoS histogram records for volume " +
+                  str(vol_id_name[0]) + ". Data:\n" + str(volume_kvs_string))
     return
 
 
@@ -812,25 +1042,34 @@ async def iscsi_sessions(session):
         r = await response.json()
     result = r['result']['sessions']
     fields = [
-        ("accountID", "account_id"), ("accountName", "account_name"), ("initiatorIP",
-                                                                       "initiator_ip"), ("initiatorName", "initiator_name"), ("initiatorSessionID", "initiator_session_id"),
-        ("nodeID", "node_id"), ("targetIP", "target_ip"), ("targetName",
-                                                           "target_name"), ("virtualNetworkID", "virtual_network_id"), ("volumeID", "volume_id")
+        ("accountID", "account_id"),
+        ("accountName", "account_name"),
+        ("initiatorIP", "initiator_ip"),
+        ("initiatorName", "initiator_name"),
+        ("initiatorSessionID", "initiator_session_id"),
+        ("nodeID", "node_id"),
+        ("targetIP", "target_ip"),
+        ("targetName", "target_name"),
+        ("virtualNetworkID", "virtual_network_id"),
+        ("volumeID", "volume_id")
     ]
     metrics = [
-        ("msSinceLastIscsiPDU", "ms_since_last_iscsi_pdu"), ("msSinceLastScsiCommand",
-                                                             "ms_since_last_scsi_command"),
-        ("serviceID", "service_id"), ("sessionID",
-                                      "session_id"), ("volumeInstance", "volume_instance")
+        ("msSinceLastIscsiPDU", "ms_since_last_iscsi_pdu"),
+        ("msSinceLastScsiCommand", "ms_since_last_scsi_command"),
+        ("serviceID", "service_id"),
+        ("sessionID", "session_id"),
+        ("volumeInstance", "volume_instance")
     ]
     iscsi_session_number = len(result)
-    if iscsi_session_number > 0:
+    if result != []:
         iscsi_sessions = ''
         for session in result:
             metric_details = ''
             record = len(metrics)
             field_details = ''
             field_detail = ''
+            if session['initiator'] is None:
+                session['initiator'] = {'alias': 'None', 'initiatorID': 'None'}
             field_details = "initiator_alias=" + \
                 session['initiator']['alias'] + "," + "initiator_id=" + \
                 str(session['initiator']['initiatorID']) + ","
@@ -840,7 +1079,7 @@ async def iscsi_sessions(session):
                 session['authentication']['chapAlgorithm'] = "None"
             if session['authentication']['chapUsername'] == "null":
                 session['authentication']['chapUsername'] = "None"
-            field_details = field_details + "auth_method=" + session['authentication']['authMethod'] + "," + "chap_algorithm=" + str(
+            field_details = field_details + "auth_method=" + str(session['authentication']['authMethod']) + "," + "chap_algorithm=" + str(
                 session['authentication']['chapAlgorithm']) + "," + "chap_username=" + str(session['authentication']['chapUsername']) + ","
             if session['accountName'] is None or len(
                     session['accountName']) == 0:
@@ -910,12 +1149,19 @@ async def cluster_performance(session):
     async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
     result = r['result']['clusterStats']
-    metrics = [("actualIOPS", "actual_iops"), ("averageIOPSize", "average_iops"),
-               ("clientQueueDepth", "client_queue_depth"), ("clusterUtilization", "cluster_utilization"), (
-                   "latencyUSec", "latency_usec"), ("normalizedIOPS", "normalized_iops"),
-               ("readBytesLastSample", "read_bytes_last_sample"), ("readLatencyUSec",
-                                                                   "read_latency_usec"), ("readOpsLastSample", "read_ops_last_sample"),
-               ("writeLatencyUSec", "write_latency_usec"), ("writeBytesLastSample", "write_bytes_last_sample"), ("writeOpsLastSample", "write_ops_last_sample")]
+    metrics = [("actualIOPS", "actual_iops"),
+               ("averageIOPSize", "average_iops"),
+               ("clientQueueDepth", "client_queue_depth"),
+               ("clusterUtilization", "cluster_utilization"),
+               ("latencyUSec", "latency_usec"),
+               ("normalizedIOPS", "normalized_iops"),
+               ("readBytesLastSample", "read_bytes_last_sample"),
+               ("readLatencyUSec", "read_latency_usec"),
+               ("readOpsLastSample", "read_ops_last_sample"),
+               ("writeLatencyUSec", "write_latency_usec"),
+               ("writeBytesLastSample", "write_bytes_last_sample"),
+               ("writeOpsLastSample", "write_ops_last_sample")
+               ]
     metric_details = ''
     record = len(metrics)
     n = 0
@@ -961,14 +1207,34 @@ async def cluster_capacity(session):
         # NOTE: CLUSTER_NAME is a tag, everything else is field data
         # NOTE: thinFactor and storageEfficiency here are SFC-derived metrics
         # and NOT part of SolidFire's GetClusterCapacity API response
-        fields = [('activeBlockSpace', 'active_block_space'), ('activeSessions', 'active_sessions'), ('averageIOPS', 'average_iops'), ('clusterRecentIOSize', 'cluster_recent_io_size'), ('compressionFactor', 'compressioN_factor'),
-                  ('currentIOPS', 'current_iops'), ('dedupeFactor', 'dedupe_factor'), ('storageEfficiency', 'storage_efficiency'), ('maxIOPS',
-                                                                                                                                    'max_iops'), ('maxOverProvisionableSpace', 'max_overprovisionable_space'), ('maxProvisionedSpace', 'max_provisioned_space'),
-                  ('maxUsedMetadataSpace', 'max_used_metadata_space'), ('maxUsedSpace', 'max_used_space'), ('nonZeroBlocks',
-                                                                                                            'non_zero_blocks'), ('peakActiveSessions', 'peak_active_sessions'), ('peakIOPS', 'peak_iops'),
-                  ('provisionedSpace', 'provisioned_space'), ('snapshotNonZeroBlocks', 'snapshot_non_zero_blocks'), (
-                      'thinFactor', 'thin_factor'), ('totalOps', 'total_ops'), ('uniqueBlocks', 'unique_blocks'),
-                  ('uniqueBlocksUsedSpace', 'unique_block_space'), ('usedMetadataSpace', 'used_block_space'), ('usedMetadataSpaceInSnapshots', 'used_metadata_space_in_snapshots'), ('usedSpace', 'used_space'), ('zeroBlocks', 'zero_blocks')]
+        fields = [('activeBlockSpace', 'active_block_space'),
+                  ('activeSessions', 'active_sessions'),
+                  ('averageIOPS', 'average_iops'),
+                  ('clusterRecentIOSize', 'cluster_recent_io_size'),
+                  ('compressionFactor', 'compressioN_factor'),
+                  ('currentIOPS', 'current_iops'),
+                  ('dedupeFactor', 'dedupe_factor'),
+                  ('storageEfficiency', 'storage_efficiency'),
+                  ('maxIOPS', 'max_iops'),
+                  ('maxOverProvisionableSpace', 'max_overprovisionable_space'),
+                  ('maxProvisionedSpace', 'max_provisioned_space'),
+                  ('maxUsedMetadataSpace', 'max_used_metadata_space'),
+                  ('maxUsedSpace', 'max_used_space'),
+                  ('nonZeroBlocks', 'non_zero_blocks'),
+                  ('peakActiveSessions', 'peak_active_sessions'),
+                  ('peakIOPS', 'peak_iops'),
+                  ('provisionedSpace', 'provisioned_space'),
+                  ('snapshotNonZeroBlocks', 'snapshot_non_zero_blocks'),
+                  ('thinFactor', 'thin_factor'),
+                  ('totalOps', 'total_ops'),
+                  ('uniqueBlocks', 'unique_blocks'),
+                  ('uniqueBlocksUsedSpace', 'unique_block_space'),
+                  ('usedMetadataSpace', 'used_block_space'),
+                  ('usedMetadataSpaceInSnapshots',
+                   'used_metadata_space_in_snapshots'),
+                  ('usedSpace', 'used_space'),
+                  ('zeroBlocks', 'zero_blocks')
+                  ]
         metric_details = 'cluster_capacity,name=' + CLUSTER_NAME + ' '
         # NOTE: Thin SFC-derived metric is the ratio of non-zero blocks to the
         # total number of blocks.
@@ -1063,8 +1329,15 @@ async def drive_stats(session):
         payload = "# DriveStats\n"
         for drive in result:
             drive_id = str(drive['driveID'])
-            pop_list = ['driveID', 'failedDieCount', 'lifetimeReadBytes', 'lifetimeWriteBytes', 'procTimestamp', 'readBytes', 'readMsec', 'readOps', 'readSectors', 'reads', 'readsCombined', 'reallocatedSectors',
-                        'reserveCapacityPercent', 'sectorSize', 'timestamp', 'totalCapacity', 'uncorrectableErrors', 'usedCapacity', 'usedMemory', 'writeBytes', 'writeMsec', 'writeOps', 'writeSectors', 'writes', 'writesCombined']
+            pop_list = ['driveID', 'failedDieCount', 'lifetimeReadBytes',
+                        'lifetimeWriteBytes', 'procTimestamp', 'readBytes',
+                        'readMsec', 'readOps', 'readSectors', 'reads',
+                        'readsCombined', 'reallocatedSectors', 'reserveCapacityPercent',
+                        'sectorSize', 'timestamp', 'totalCapacity',
+                        'uncorrectableErrors', 'usedCapacity', 'usedMemory',
+                        'writeBytes', 'writeMsec', 'writeOps', 'writeSectors',
+                        'writes', 'writesCombined'
+                        ]
             for key in pop_list:
                 drive.pop(key)
             metric_details = ''
@@ -1084,10 +1357,482 @@ async def drive_stats(session):
                                  ",id=" + drive_id + " " + metric_details + "\n")
         if args.loglevel == 'DEBUG':
             logging.debug("Drive stats: " + str(payload))
-            logging.debug('Drive stats collected in ' +
-                          str(time_taken) + ' seconds.')
         await send_to_influx(payload)
     time_taken = (round(time.time(), 3) - time_start)
+    if args.loglevel == 'DEBUG':
+        logging.debug(
+            'Drive stats collected in ' +
+            str(time_taken) +
+            ' seconds.')
+    await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
+    return
+
+
+async def schedules(session):
+    """
+    Use ListSchedules to get snapshot schedules and sends a subset of each to InfluxDB.
+
+    There are different types of schedules. schedules() parses only snapshot type schedule.
+    """
+    function_name = 'schedules'
+    sleep_delay = random.randint(5, 10)
+    await asyncio.sleep(sleep_delay)
+    time_start = round(time.time(), 3)
+    api_payload = "{ \"method\": \"ListSchedules\" }"
+    async with session.post(SF_POST_URL, data=api_payload) as response:
+        r = await response.json()
+        if args.loglevel == 'DEBUG':
+            logging.debug("Schedules response:\n" + str(r))
+    result = r['result']['schedules']
+    if args.loglevel == 'DEBUG':
+        logging.debug("Processing schedules:\n" + str(result))
+
+    payload = ''
+    payload_header = "schedules,cluster=" + CLUSTER_NAME + ","
+    for schedule in result:
+        if schedule['scheduleType'] == 'Snapshot':
+            # NOTE: `volumeID` appears if for single-volume snapshot schedules while `volumes` appears in multi-volume (group) snapshot schedules!
+            # NOTE: Because of that 'volumeID' and 'volumes' are dropped and
+            # `volume_count` is used instead
+            schedule_fields = [('scheduleID', 'schedule_id')]
+            schedule_tags = [
+                ('enableRemoteReplication',
+                 'enable_remote_replication'),
+                ('enableSerialCreation',
+                 'enable_serial_creation'),
+                ('hasError',
+                 'has_error'),
+                ('lastRunStatus',
+                 'last_run_status'),
+                ('scheduleName',
+                 'schedule_name'),
+                ('name',
+                 'snapshot_name'),
+                ('paused',
+                 'paused'),
+                ('recurring',
+                 'recurring'),
+                ('runNextInterval',
+                 'run_next_interval'),
+                ('scheduleType',
+                 'schedule_type'),
+                ('volume_count',
+                 'volume_count')]
+            if 'scheduleInfo' in schedule:
+                for k in ['enableRemoteReplication', 'enableSerialCreation']:
+                    if k in schedule['scheduleInfo']:
+                        if schedule['scheduleInfo'][k] == True:
+                            schedule['scheduleInfo'][k] = 1
+                        else:
+                            # NOTE: set to 0 if not True to avoid having to
+                            # check for None
+                            schedule['scheduleInfo'][k] = 0
+                    else:
+                        # NOTE: pop the key from schedule_tags and
+                        # schedule_fields as we don't need it
+                        for l in [schedule_tags, schedule_fields]:
+                            p = next(
+                                (i for i, t in enumerate(l) if t[0] == k), None)
+                            if p is not None:
+                                l.pop(p)
+                    # NOTE: deal with `volumes` vs `volumeID` stuff
+                    if 'volumes' in schedule['scheduleInfo'] or 'volumeID' in schedule['scheduleInfo']:
+                        if 'volumes' in schedule['scheduleInfo']:
+                            # NOTE: volumes aren't kept because there may be
+                            # hundreds in this list
+                            schedule['volume_count'] = len(
+                                schedule['scheduleInfo']['volumes'])
+                            schedule['scheduleInfo'].pop('volumes')
+                        elif 'volumeID' in schedule['scheduleInfo']:
+                            schedule['volume_count'] = 1
+                            schedule['scheduleInfo'].pop('volumeID')
+            for key in ['lastRunStatus']:
+                if key in schedule:
+                    if schedule[key] == 'Success':
+                        schedule[key] = 1
+                    else:
+                        schedule[key] = 0
+                else:
+                    if args.loglevel == 'DEBUG':
+                        logging.debug(
+                            "Key >> " + str(key) + " << not in schedule keys")
+            for key in ['hasError', 'paused', 'recurring', 'runNextInterval']:
+                if schedule[key] == True:
+                    schedule[key] = 1
+                else:
+                    schedule[key] = 0
+            # NOTE: process tags
+            tags = ''
+            for tag in schedule_tags[0:-1]:
+                tag_key = tag[1]
+                if tag[0] in schedule:
+                    tag_val = schedule[tag[0]]
+                tags = tags + tag_key + "=" + str(tag_val) + ","
+            for tag in schedule_tags[-1:]:
+                tag_key = tag[1]
+                tag_val = schedule[tag[0]]
+                tags = tags + tag_key + "=" + str(tag_val) + ""
+            fields = ' '
+            for field in schedule_fields:
+                if field[0] in schedule:
+                    field_val = schedule[field[0]]
+                    if isinstance(field_val, str):
+                        field_val = "\"" + str(field_val) + "\""
+                elif 'scheduleInfo' in schedule and schedule['scheduleInfo'] is not None and schedule['scheduleInfo'] != {}:
+                    try:
+                        if field[0] in schedule['scheduleInfo'].keys():
+                            field_val = schedule['scheduleInfo'][field[0]]
+                            if isinstance(field_val, str):
+                                field_val = "\"" + str(field_val) + "\""
+                        else:
+                            if field[0] == 'name' and 'name' not in schedule['scheduleInfo']:
+                                schedule['scheduleInfo']['name'] = "auto-by-SolidFire"
+                                field_val = schedule['scheduleInfo']['name']
+                                if isinstance(field_val, str):
+                                    field_val = "\"" + str(field_val) + "\""
+                    except BaseException:
+                        field_val = None
+                else:
+                    if args.loglevel == 'DEBUG':
+                        logging.debug("Field not in schedule or scheduleINFO: " +
+                                      str(field[0]) + " is type: " + str(type(field_val)))
+                    field_val = None
+                if next((i for i, t in enumerate(schedule_fields)
+                        if t[0] == field[0]), None) == len(schedule_fields) - 1:
+                    fields = fields + field[1] + "=" + str(field_val) + " "
+                else:
+                    fields = fields + field[1] + "=" + str(field_val) + ","
+            snapshot_payload = payload_header + tags + fields + "\n"
+            payload = payload + snapshot_payload
+        else:
+            logging.info("Unsupported schedule type observed.")
+
+    time_taken = (round(time.time(), 3) - time_start)
+    if args.loglevel == 'DEBUG':
+        logging.debug("Schedules:\n" + str(payload))
+        logging.debug('Schedules collected in ' +
+                      str(time_taken) + ' seconds.')
+    await send_to_influx(payload)
+    await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
+    return
+
+
+async def snapshot_groups(session):
+    """
+    Uses ListGroupSnapshots to get information about group snapshots and send a subset of each to InfluxDB.
+    """
+    function_name = 'snapshot_groups'
+    sleep_delay = random.randint(5, 10)
+    await asyncio.sleep(sleep_delay)
+    time_start = round(time.time(), 3)
+    api_payload = "{ \"method\": \"ListGroupSnapshots\" }"
+    async with session.post(SF_POST_URL, data=api_payload) as response:
+        r = await response.json()
+        if args.loglevel == 'DEBUG':
+            logging.debug("Group snapshots response:\n" + str(r))
+    result = r['result']['groupSnapshots']
+    if args.loglevel == 'DEBUG':
+        logging.debug("Processing group snapshots:\n" + str(result))
+    snap_tags = [
+        ('createTime',
+         'create_time'),
+        ('enableRemoteReplication',
+         'enable_remote_replication'),
+        ('expirationTime',
+         'expiration_time'),
+        ('groupSnapshotID',
+         'grp_snapshot_id'),
+        ('name',
+         'grp_snapshot_name'),
+        ('remoteStatus',
+         'remote_grp_status'),
+        ('status',
+         'status')]
+    snap_fields = [('groupSnapshotID', 'grp_snapshot_id'),
+                   ('members', 'members')]
+    snap_pop = ['attributes']
+    result = sorted(result, key=lambda k: k['groupSnapshotID'])
+    payload = ''
+    payload_header = "snapshot_groups,cluster=" + CLUSTER_NAME + ","
+    for snapshot in result:
+        # NOTE: process time values to save disk space
+        try:
+            if isinstance(snapshot['members'],
+                          list) and snapshot['members'] != []:
+                if snapshot['members'][0]['expirationTime'] == 'fifo':
+                    # NOTE: If expirationTime is 'fifo', set it to 0, it's
+                    # technically equivalent - if no newer snapshots come,
+                    # existing will stay around
+                    snap_epoch_sec = await time_diff_epoch(snapshot['createTime'], snapshot['createTime'])
+                elif snapshot['members'][0]['expirationTime'] is None:
+                    # Note: treat this as 'never' and set it to 31 Dec 2037
+                    snap_epoch_sec = await time_diff_epoch(snapshot['createTime'], '0')
+                else:
+                    snap_epoch_sec = await time_diff_epoch(snapshot['createTime'], snapshot['members'][0]['expirationTime'])
+                if isinstance(snap_epoch_sec[0], int) and isinstance(
+                        snap_epoch_sec[1], int):
+                    snapshot['createTime'] = snap_epoch_sec[0]
+                    snapshot['members'][0]['expirationTime'] = snap_epoch_sec[1]
+                else:
+                    snapshot['createTime'] = snap_epoch_sec[0]
+            else:
+                if args.loglevel == 'DEBUG':
+                    logging.debug(
+                        "No snapshot[members] or snapshot[members][0] is None")
+        except Exception as e:
+            logging.error("Error in time_diff_epoch function: " +
+                          str(e) +
+                          " for snapshot: " +
+                          str(snapshot['groupSnapshotID']))
+            snapshot['createTime'] = 0
+            snapshot['expirationTime'] = 0
+        for s in snap_pop:
+            if s in snapshot:
+                snapshot.pop(s)
+        if snapshot['enableRemoteReplication'] == False:
+            snapshot['enableRemoteReplication'] = 0
+        else:
+            snapshot['enableRemoteReplication'] = 1
+        if snapshot['status'] == 'done':
+            snapshot['status'] = 1
+        else:
+            # NOTE: Else map to 0, although there may be "Syncing" and more
+            snapshot['status'] = 0
+        if 'remoteStatuses' in snapshot:
+            if snapshot['remoteStatuses'] != [
+            ] and snapshot['remoteStatuses'][0] is not None:
+                if snapshot['remoteStatuses'][0]['remoteStatus'] == 'Present':
+                    snapshot['remoteStatus'] = 1
+                else:
+                    # NOTE: Else 0, although there may be intermediate states
+                    if args.loglevel == 'DEBUG':
+                        logging.debug("Remote status is NOT Present: " +
+                                      str(snapshot['remoteStatus']) +
+                                      " so setting it to 0.")
+                    snapshot['remoteStatus'] = 0
+        tags = ''
+        for tag in snap_tags:
+            tag_key = tag[1]
+            if tag[0] in snapshot:
+                if snapshot[tag[0]] is None:
+                    tag_val = 0
+                else:
+                    tag_val = snapshot[tag[0]]
+            elif tag[0] == 'expirationTime':
+                tag_val = snap_epoch_sec[1]
+            elif 'remoteStatuses' in snapshot:
+                if isinstance(snapshot['remoteStatuses'], list) and snapshot['remoteStatuses'] != [
+                ] and snapshot['remoteStatuses'][0] is not None:
+                    try:
+                        if tag[0] in snapshot['remoteStatuses'][0].keys():
+                            tag_val = snapshot['remoteStatuses'][0][tag[0]]
+                    except BaseException:
+                        logging.debug(
+                            "Tag " + str(
+                                tag[0]) + " does NOT exist in snapshot or snapshot-remoteStatuses: ",
+                            snapshot['remoteStatuses'][0].keys())
+                        tag_val = "0"
+            else:
+                if args.loglevel == 'DEBUG':
+                    logging.debug("Tag  " +
+                                  str(tag[0]) +
+                                  " does NOT exist in schedule or scheduleInfo: " +
+                                  str(tag[0]))
+                tag_val = "0"
+            if tag == snap_tags[-1]:
+                tags = tags + tag_key + "=" + str(tag_val) + ""
+            else:
+                tags = tags + tag_key + "=" + str(tag_val) + ","
+        fields = ' '
+        for field in snap_fields:
+            if field[0] in snapshot:  # if scheduleInfo does not exist, use the schedule object
+                if snapshot[field[0]] is None:
+                    field_val = 0
+                elif isinstance(snapshot[field[0]], list) and snapshot[field[0]] != []:
+                    field_val = len(snapshot[field[0]])
+                else:
+                    field_val = snapshot[field[0]]
+            elif 'remoteStatuses' in snapshot:
+                if snapshot['remoteStatuses'] != [
+                ] and snapshot['remoteStatuses'][0] is not None:
+                    try:
+                        if field[0] in snapshot['remoteStatuses'][0].keys():
+                            field_val = snapshot['remoteStatuses'][0][field[0]]
+                    except BaseException:
+                        field_val = "0"
+            else:
+                if args.loglevel == 'DEBUG':
+                    logging.debug(
+                        "  - Field does NOT exist in schedule or scheduleInfo: " + str(field[0]))
+                field_val = "0"
+            field_key = field[1]
+            if isinstance(field_val, str):
+                field_val = "\"" + str(field_val) + "\""
+            elif isinstance(field_val, int):
+                field_val = str(field_val) + "i"
+            if field == snap_fields[-1]:
+                fields = fields + field_key + "=" + field_val + ""
+            else:
+                fields = fields + field_key + "=" + field_val + ","
+        snapshot_payload = payload_header + tags + fields + "\n"
+        payload = payload + snapshot_payload
+    time_taken = (round(time.time(), 3) - time_start)
+    if args.loglevel == 'DEBUG':
+        logging.debug("Snapshot groups:\n" + str(payload))
+        logging.debug('Snapshot groups collected in ' +
+                      str(time_taken) + ' seconds.')
+    await send_to_influx(payload)
+    await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
+    return
+
+
+async def snapshots(session):
+    """
+    Uses ListSnapshots to get list of snapshots and sends a subset of each to InfluxDB.
+    """
+    function_name = 'snapshots'
+    sleep_delay = random.randint(5, 10)
+    await asyncio.sleep(sleep_delay)
+    time_start = round(time.time(), 3)
+    api_payload = "{ \"method\": \"ListSnapshots\" }"
+    async with session.post(SF_POST_URL, data=api_payload) as response:
+        r = await response.json()
+    result = r['result']['snapshots']
+    snap_tags = [
+        ('createTime',
+         'create_time'),
+        ('enableRemoteReplication',
+         'enable_remote_replication'),
+        ('expirationTime',
+         'expiration_delta'),
+        ('name',
+         'new_snapshot_name'),
+        ('remoteStatus',
+         'remote_status'),
+        ('snapshotID',
+         'snapshot_id'),
+        ('status',
+         'status'),
+        ('volumeName',
+         'volume_name'),
+        ('volumePairUUID',
+         'volume_pair_uuid')]
+    snap_fields = [('groupID', 'group_id'), ('volumeID', 'volume_id')]
+    snap_pop = [
+        'attributes',
+        'checksum',
+        'expirationReason',
+        'instanceCreateTime',
+        'instanceSnapshotUUID',
+        'snapMirrorLabel',
+        'snapshotUUID',
+        'virtualVolumeID']
+    result = sorted(result, key=lambda k: k['snapshotID'])
+    payload = ''
+    payload_header = "snapshots,cluster=" + CLUSTER_NAME + ","
+    for snapshot in result:
+        try:
+            if snapshot['expirationTime'] is None or snapshot['expirationTime'] == 'null' or snapshot['expirationTime'] == 'fifo':
+                # NOTE: time_diff_epoch takes strings as input and '0' means no
+                # expiration
+                snapshot['expirationTime'] = '0'
+            snap_epoch_sec = await time_diff_epoch(snapshot['createTime'], snapshot['expirationTime'])
+            if isinstance(snap_epoch_sec[0], int) and isinstance(
+                    snap_epoch_sec[1], int):
+                snapshot['createTime'] = snap_epoch_sec[0]
+                snapshot['expirationTime'] = snap_epoch_sec[1]
+            else:
+                snapshot['createTime'] = 0
+                snapshot['expirationTime'] = 0
+        except Exception as e:
+            logging.error("Error in time_diff_epoch function: " + str(e))
+            snapshot['createTime'] = 0
+            snapshot['expirationTime'] = 0
+        for s in snap_pop:
+            if s in snapshot:
+                snapshot.pop(s)
+        if snapshot['enableRemoteReplication'] == False:
+            snapshot['enableRemoteReplication'] = 0
+        else:
+            snapshot['enableRemoteReplication'] = 1
+        if snapshot['status'] == 'done':
+            snapshot['status'] = 1
+        else:
+            # NOTE: Else map to 0, although there may be "Syncing" and more
+            snapshot['status'] = 0
+        if 'remoteStatuses' in snapshot:
+            if snapshot['remoteStatuses'] != [
+            ] and snapshot['remoteStatuses'][0] is not None:
+                if snapshot['remoteStatuses'][0]['remoteStatus'] == 'Present':
+                    snapshot['remoteStatus'] = 1
+                else:
+                    # NOTE: Else 0, although there may be intermediate states
+                    snapshot['remoteStatus'] = 0
+        tags = ''
+        for tag in snap_tags:
+            tag_key = tag[1]
+            if tag[0] in snapshot:  # if scheduleInfo does not exist, use the schedule object
+                if snapshot[tag[0]] is None:
+                    tag_val = 0
+                else:
+                    tag_val = snapshot[tag[0]]
+            elif 'remoteStatuses' in snapshot:
+                if snapshot['remoteStatuses'] != [
+                ] and snapshot['remoteStatuses'][0] is not None:
+                    try:
+                        if tag[0] in snapshot['remoteStatuses'][0].keys():
+                            tag_val = snapshot['remoteStatuses'][0][tag[0]]
+                    except BaseException:
+                        if args.loglevel == 'DEBUG':
+                            logging.debug(
+                                "Tag does NOT exist in snapshot or snapshot-remoteStatuses: ",
+                                snapshot['remoteStatuses'][0].keys())
+                        tag_val = "0"
+            else:
+                if args.loglevel == 'DEBUG':
+                    logging.debug(
+                        "Tag does NOT exist in schedule or scheduleInfo: " + str(tag[0]))
+                tag_val = "0"
+            if tag_key in snap_tags[-1]:
+                tags = tags + tag_key + "=" + str(tag_val) + ""
+            else:
+                tags = tags + tag_key + "=" + str(tag_val) + ","
+        fields = ' '
+        for field in snap_fields:
+            if args.loglevel == 'DEBUG':
+                logging.debug("Processing field: " + str(field))
+            if field[0] in snapshot:  # if scheduleInfo does not exist, use the schedule object
+                if snapshot[field[0]] is None:
+                    field_val = 0
+                else:
+                    field_val = snapshot[field[0]]
+            elif 'remoteStatuses' in snapshot:
+                if snapshot['remoteStatuses'] != [
+                ] and snapshot['remoteStatuses'][0] is not None:
+                    try:
+                        if field[0] in snapshot['remoteStatuses'][0].keys():
+                            field_val = snapshot['remoteStatuses'][0][field[0]]
+                    except BaseException:
+                        field_val = "0"
+            else:
+                field_val = "0"
+            field_key = field[1]
+            if isinstance(field_val, str):
+                field_val = "\"" + str(field_val) + "\""
+            elif isinstance(field_val, int):
+                field_val = str(field_val) + "i"
+            if field == snap_fields[-1]:
+                fields = fields + field_key + "=" + field_val + ""
+            else:
+                fields = fields + field_key + "=" + field_val + ","
+        snapshot_payload = payload_header + tags + fields + "\n"
+        payload = payload + snapshot_payload
+
+    time_taken = (round(time.time(), 3) - time_start)
+    logging.info('Snapshots collected in ' + str(time_taken) + ' seconds.')
+    if args.loglevel == 'DEBUG':
+        logging.debug("Snapshots:\n" + str(payload))
+    await send_to_influx(payload)
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     return
 
@@ -1096,8 +1841,10 @@ async def send_to_influx(payload):
     """
     Send received payload to InfluxDB.
     """
-    measurement = payload.split(",")[0]    
-    logging.debug('send_to_influx() received data for ' + measurement + ': ' +    str(payload.count('\n')) + ' lines.')
+    measurement = payload.split(",")[0]
+    if args.loglevel == 'DEBUG':
+        logging.debug('send_to_influx() received data for ' +
+                      measurement + ': ' + str(payload.count('\n')) + ' lines.')
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(enable_cleanup_closed=True)) as session:
         urlPostEndpoint = 'http://' + INFLUX_HOST + ':' + \
             INFLUX_PORT + '/write?db=' + INFLUX_DB + "&precision=s"
@@ -1108,10 +1855,12 @@ async def send_to_influx(payload):
     if resp != 204:
         logging.error('Failed to send metrics to InfluxDB. Measurement: ' +
                       measurement + ', response code: ' + str(resp))
+        logging.error('Payload:\n' + str(payload))
         return False
     else:
-        logging.debug('send_to_influx() for ' +
-                      measurement + ': response code: 204')
+        if args.loglevel == 'DEBUG':
+            logging.debug('send_to_influx() for ' +
+                          measurement + ': response code: 204')
         return True
 
 
@@ -1127,8 +1876,13 @@ async def _split_list(long_list: list) -> list:
         shorter_lists = [long_list[i:i + CHUNK_SIZE]
                          for i in range(0, len(long_list), CHUNK_SIZE)]
         logging.info('Split ' + str(len(long_list)) +
-                 ' long list using chunk size ' + str(CHUNK_SIZE))
-        logging.debug('Lists created: ' + str(len(shorter_lists)) + ' . List printout:\n' + str(shorter_lists) + '.')
+                     ' long list using chunk size ' + str(CHUNK_SIZE))
+        if args.loglevel == 'DEBUG':
+            logging.debug('Lists created: ' +
+                          str(len(shorter_lists)) +
+                          ' . List printout:\n' +
+                          str(shorter_lists) +
+                          '.')
         return shorter_lists
 
 
@@ -1136,8 +1890,52 @@ async def _send_function_stat(cluster_name, function, time_taken):
     """
     Send function execution metrics to InfluxDB.
     """
-    await send_to_influx("sfc_metrics,cluster=" + cluster_name + ",function=" + function + " " + "time_taken=" + str(time_taken) + "\n")
+    try:
+        await send_to_influx("sfc_metrics,cluster=" + cluster_name + ",function=" + function + " " + "time_taken=" + str(time_taken) + "\n")
+    except BaseException:
+        logging.error("Failed to send function stats to InfluxDB.")
     return
+
+
+async def time_diff_epoch(t1: str, t2: str) -> tuple:
+    """
+    Calculate the difference between two timestamps in seconds and returns a tuple with the first time and time delta in seconds.
+
+    Example: T1 is the start time and T2 is the end time. The function returns T1 in seconds since epoch and T2 as integer delta vs. T2.
+    t1 and t2 are ISO 8601-formatted strings. The primary use case is to calculate the time difference between the snapshot creation time and expiration time so that we can tell how recent t1 is and how long before t2 expires.
+    If t2 is `null` (never), the function returns 2145844799 (end of Dec 31, 2037) as the expiration time.
+    """
+    create_time = t1
+    expiration_time = t2
+    try:
+        if t2 == '0':
+            dt_e = datetime.datetime(2037, 12, 31, 11, 59, 59)
+        else:
+            dt_e = datetime.datetime.strptime(
+                expiration_time, "%Y-%m-%dT%H:%M:%SZ")
+        dt_c = datetime.datetime.strptime(create_time, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        logging.error(
+            "Error parsing the timestamps: " +
+            str(create_time) +
+            " and " +
+            str(expiration_time) +
+            ". Exiting.")
+        exit(400)
+    try:
+        create_time_epoch = int(dt_c.timestamp())
+        ce_epoch = (create_time_epoch, int((dt_e - dt_c).total_seconds()))
+    except ValueError:
+        logging.error(
+            "Error parsing the timestamps: " +
+            str(create_time) +
+            " and " +
+            str(expiration_time) +
+            ". Exiting.")
+        exit(400)
+    if args.loglevel == 'DEBUG':
+        logging.debug("==> Time difference in seconds: " + str(ce_epoch) + ".")
+    return (ce_epoch)
 
 
 async def hi_freq_tasks():
@@ -1149,9 +1947,13 @@ async def hi_freq_tasks():
     time_start = round(time.time(), 3)
     global ITERATION
     ITERATION += 1
-    logging.info("Iteration: " + str(ITERATION) + " of high-frequency tasks.")
+    logging.info(
+        "==> ITERATION " +
+        str(ITERATION) +
+        " of high-frequency tasks.")
     session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(
-        # enable_cleanup_closed=True, timeout_ceil_threshold=20), headers=headers)
+        # enable_cleanup_closed=True, timeout_ceil_threshold=20),
+        # headers=headers)
         enable_cleanup_closed=True), headers=headers)
     task_list = [cluster_faults, cluster_performance,
                  node_performance, volume_performance, sync_jobs]
@@ -1201,7 +2003,7 @@ async def lo_freq_tasks():
     session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(
         enable_cleanup_closed=True, timeout_ceil_threshold=30), headers=headers)
     task_list = [account_efficiency, cluster_version,
-                 drive_stats, volume_efficiency]
+                 drive_stats, schedules, volume_efficiency]
     logging.info('Low-frequency tasks: ' + str(len(task_list)))
     bg_tasks = set()
     for t in task_list:
@@ -1224,7 +2026,7 @@ async def experimental():
     time_start = round(time.time(), 3)
     session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(
         enable_cleanup_closed=True, timeout_ceil_threshold=20), headers=headers)
-    task_list = [volume_qos_histograms]
+    task_list = [schedules, snapshot_groups, snapshots, volume_qos_histograms]
     logging.info('Experimental tasks: ' + str(len(task_list)))
     bg_tasks = set()
     for t in task_list:
@@ -1276,8 +2078,13 @@ async def get_cluster_name():
             result = await resp.json()
     cluster_name = result['result']['clusterInfo']['name']
     time_end = round(time.time(), 3)
-    time_taken = time_end - time_start    
-    logging.info('Obtained SolidFire cluster name for tagging of SolidFire metrics: ' + str(cluster_name) + '. Time taken: ' + str(time_taken) + ' seconds.')
+    time_taken = time_end - time_start
+    logging.info(
+        'Obtained SolidFire cluster name for tagging of SolidFire metrics: ' +
+        str(cluster_name) +
+        '. Time taken: ' +
+        str(time_taken) +
+        ' seconds.')
     return cluster_name
 
 
@@ -1286,14 +2093,18 @@ async def get_cluster_name():
 
 async def main():
     await create_database(INFLUX_DB)
-    # NOTE: global variable for iteration count in high-frequency tasks    
+    # NOTE: global variable for iteration count in high-frequency tasks
     global ITERATION
     ITERATION = 0
     global CHUNK_SIZE
     global CLUSTER_NAME
     CLUSTER_NAME = await get_cluster_name()
     scheduler = AsyncIOScheduler(misfire_grace_time=10)
-    scheduler.add_job(hi_freq_tasks, 'interval', seconds=INT_HI_FREQ, max_instances=1)
+    scheduler.add_job(
+        hi_freq_tasks,
+        'interval',
+        seconds=INT_HI_FREQ,
+        max_instances=1)
     scheduler.add_job(med_freq_tasks, 'interval', seconds=INT_MED_FREQ)
     scheduler.add_job(lo_freq_tasks, 'interval', seconds=INT_LO_FREQ)
     if args.experimental == True:
@@ -1303,7 +2114,7 @@ async def main():
                           seconds=INT_EXPERIMENTAL_FREQ)
     else:
         logging.info(
-            'Experimental collectors disabled not scheduling experimental tasks.')
+            'Experimental collectors disabled. Not scheduling experimental tasks.')
     logging.warning('Starting scheduler.')
     scheduler.start()
     while True:
@@ -1354,9 +2165,11 @@ if __name__ == '__main__':
         'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'), help='log level for console output. Default: INFO')
     parser.add_argument('-lf', '--logfile', nargs='?', const=1, type=str, default=None,
                         required=False, help='log file name. SFC logs only to console by default. Default: None')
+    parser.add_argument('-c', '--ca-chain', nargs='?', const=1, type=str, default=None, required=False,
+                        help='Optional filename with your (full) CA chain to be copied to the Ubuntu/Debian/Alpine OS certificate store. Users of other systems may import manually. Default: None')
     args = parser.parse_args()
-    
-    FORMAT = '%(asctime)-15s - %(levelname)s - %(funcName)s - %(message)s'
+
+    FORMAT = '%(asctime)-15s - %(levelname)s - %(funcName)s - %(lineno)d - %(message)s'
     if args.logfile:
         logging.info('Logging to file: ' + args.logfile)
         logging.basicConfig(filename=args.logfile, level=args.loglevel,
@@ -1377,10 +2190,52 @@ if __name__ == '__main__':
         args.password = getpass(
             "Enter the password for SolidFire cluster (not logged): ")
 
+    if args.frequency_high is None:
+        args.frequency_high = INT_HI_FREQ
+    else:
+        INT_HI_FREQ = int(args.frequency_high)
+    if args.frequency_med is None:
+        args.frequency_med = INT_MED_FREQ
+    else:
+        INT_MED_FREQ = int(args.frequency_med)
+    if args.frequency_low is None:
+        args.frequency_low = INT_LO_FREQ
+    else:
+        INT_LO_FREQ = int(args.frequency_low)
+    logging.info(
+        'Hi/med/lo frequency intervals: ' +
+        str(INT_HI_FREQ) +
+        '/' +
+        str(INT_MED_FREQ) +
+        '/' +
+        str(INT_LO_FREQ) +
+        ' seconds.')
+
     if args.experimental == True:
         logging.warning('Experimental collectors enabled.')
     else:
         logging.info('Experimental collectors disabled (recommended default)')
+
+    if args.ca_chain is not None and platform.system() == 'Linux' and (platform.dist(
+    )[0] == 'Ubuntu' or platform.dist()[0] == 'Debian' or platform.dist()[0] == 'Alpine'):
+        if os.path.exists(args.c):
+            logging.info('Copying CA chain to OS certificate store.')
+            os.system(
+                'sudo cp ' +
+                args.ca_chain +
+                ' /usr/local/share/ca-certificates/')
+            # chmod 644 is required for the file to be picked up by
+            # update-ca-certificates
+            os.system(
+                'sudo chmod 644 /usr/local/share/ca-certificates/' +
+                os.path.basename(
+                    args.ca_chain))
+            os.system('sudo update-ca-certificates')
+            logging.info('OS certificate store refreshed.')
+
+        else:
+            logging.error('CA chain file not found. Exiting.')
+            sys.exit(1)
 
     # The below works for SolidFire 12.5, 12.7 or higher v12
     SF_JSON_PATH = '/json-rpc/12.5/'
@@ -1392,5 +2247,5 @@ if __name__ == '__main__':
     except (KeyboardInterrupt, SystemExit):
         pass
     except Exception as e:
-        print("Exception:", e)
+        logging.info("Exception:", str(e))
         pass

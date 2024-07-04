@@ -2,11 +2,12 @@
 
 - [Dashboards](#dashboards)
   - [Grafana version](#grafana-version)
-  - [Grafana Data Source](#grafana-data-source)
-  - [Aliasing or replacing Grafana's labels](#aliasing-or-replacing-grafanas-labels)
-  - [Overcoming long updates of certain measurements](#overcoming-long-updates-of-certain-measurements)
+    - [Grafana Data Source](#grafana-data-source)
+    - [Aliasing or replacing Grafana's labels](#aliasing-or-replacing-grafanas-labels)
+    - [Overcoming long updates of certain measurements](#overcoming-long-updates-of-certain-measurements)
+    - [Add cluster or data source other variable to dashboard](#add-cluster-or-data-source-other-variable-to-dashboard)
   - [Measurements](#measurements)
-    - [QoS Histograms](#qos-histograms)
+    - [Experimental measurements](#experimental-measurements)
   - [Reference InfluxQL queries and dashboard examples SFC](#reference-influxql-queries-and-dashboard-examples-sfc)
     - [Notes](#notes)
     - [Account efficiency (`account_efficiency`)](#account-efficiency-account_efficiency)
@@ -18,12 +19,15 @@
     - [Drive stats (`drive_stats`)](#drive-stats-drive_stats)
     - [Node performance (`node_performance`)](#node-performance-node_performance)
     - [iSCSI connections (`iscsi_sessions`)](#iscsi-connections-iscsi_sessions)
-    - [QoS Histograms (`histogram_*`)](#qos-histograms-histogram_)
-    - [Snapshots (`snapshots`)](#snapshots-snapshots)
     - [Sync jobs (`sync_jobs`)](#sync-jobs-sync_jobs)
     - [Volume efficiency (`volume_efficiency`)](#volume-efficiency-volume_efficiency)
     - [Volumes (`volumes`)](#volumes-volumes)
     - [Volume performance (`volume_performance`)](#volume-performance-volume_performance)
+    - [Data and queries for experimental measurements](#data-and-queries-for-experimental-measurements)
+      - [QoS Histograms (`histogram_*`)](#qos-histograms-histogram_)
+      - [Schedules (`schedules`)](#schedules-schedules)
+      - [Snapshots (`snapshots`)](#snapshots-snapshots)
+      - [Snapshot groups (`snapshot_groups`)](#snapshot-groups-snapshot_groups)
 
 
 ## Grafana version
@@ -35,7 +39,7 @@ Several recent Grafana major versions support InfluxDB v1 and since SFC doesn't 
 If reference dashboard or queries don't work with latest release of grafana, please import the dashboard and try different panel settings or queries. 
 
 
-## Grafana Data Source
+### Grafana Data Source
 
 How to create an InfluxDB source in Grafana 11:
 
@@ -49,14 +53,14 @@ How to create an InfluxDB source in Grafana 11:
 You *may* add other complex settings and secure InfluxDB, but SFC is written with the idea that it connects to InfluxDB within same Kubernetes or Docker namespace or same host, so you may need to modify SFC to use HTTP(S) and/or add authentication when connecting InfluxDB. I expect most SFC users will use Docker Compose, Kubernetes or local VM, where HTTP is fine.
 
 
-## Aliasing or replacing Grafana's labels
+### Aliasing or replacing Grafana's labels
 
 Certain parts of Grafana are hard to use.
 
 Personally I find the difficulty of aliasing data in labels the worst. Below in Account Efficiency, there's an example on how to do that. The same general technique works for other metrics below. The Grafana Web site and Community have additional approaches and workarounds.
 
 
-## Overcoming long updates of certain measurements
+### Overcoming long updates of certain measurements
 
 As explained elsewhere, SFC uses three schedules for high, medium and low-frequency of data collection. 
 
@@ -77,6 +81,13 @@ Of course, nothing prevents you from having everything in one dashboard, but wha
   - Select reasonable time range (e.g. 2 days) for your users
   - Click on the little floppy disk icon to save your slow dashboard and select `Save current time range as dashboard default`
 
+### Add cluster or data source other variable to dashboard
+
+Users who have multiple clusters or data sources may [add variables to dashboard](https://grafana.com/docs/grafana/latest/dashboards/variables/add-template-variables/#add-a-query-variable).
+
+That may also be useful for dealing with down-sampled data because down-sampled and default measurement names differ in InfluxDB v1.
+
+The reference dashboard has a cluster name variable, which can be useful if multiple clusters report into the same InfluxDB. Select "All" to view all clusters, or any individual if you want to see just one. Panels may be adjusted to show a separate panel for each variable (i.e. two panels for two clusters) or all in one (repeat disabled, which is the default) - to see those go to: Panel Options > Repeat options.
 
 ## Measurements
 
@@ -91,33 +102,21 @@ This is what's collected by default. Volume properties and statistics are collec
 - drive_stats
 - iscsi_sessions
 - node_performance
-- sfc_metrics
 - volume_efficiency
 - volume_performance
 - volumes
 
+### Experimental measurements
 
-### QoS Histograms
+These are activated by passing `-ex` to SFC and you can see what they do and how at [the bottom of this page](#data-and-queries-for-experimental-measurements).
 
-QoS histograms are *not* collected by default. You may enable QoS histogram collection with a switch (`sfc.py -h`). 
-
-- histogram_below_min_iops_percentages
-- histogram_min_to_max_iops_percentages
-- histogram_read_block_sizes
-- histogram_target_utilization_percentage
-- histogram_throttle_percentages
-- histogram_write_block_sizes
-
-These metrics correspond to the names from the SolidFire API, so you can refer to the SolidFire documentation. 
-
-SFC changes names of histogram buckets to be Grafana-friendly, but it's easy to tell which SFC bucket name corresponds to the original bucket name from the original histogram object.
-
+As you will notice later, not all measurements are conductive to easy visualization in Grafana. On the one hand that's because they are strings which may require more work, on the other the idea is they may be useful for reporting and querying outside of Grafana.
 
 ## Reference InfluxQL queries and dashboard examples SFC
 
 ### Notes
 
-Some queries here and also in reference [dashboard.json](./dashboard.json) have an unnecessary `alias` in them, as I'm currently experimenting with that feature. That doesn't mean it should be used, or that I recommend it.
+Some queries here and also in reference [dashboard.json](./dashboard.json) have an unnecessary `alias` or other setting in them. That doesn't mean it should be used or that I recommend it - it may be junk from my testing. 
 
 Some queries are set to use `last`, others `mean`. In some cases `last` is used because that's what I wanted while working on SFC. For example, in cluster faults I don't want `mean` of 0s (no problem) and 1s (unresolved fault). Where `mean` is used it may be only because that's what Grafana does by default. In other cases maybe I have `last` simply because I wanted to see if the code was working properly, but normally I'd use `mean`. And finally, there may be cases where you'd want something different, so feel free to modify any and all queries to suit your needs.
 
@@ -320,48 +319,6 @@ This example shows milliseconds since last client's SCSI command, which Windows 
 There are 2-3 other metrics such as session instance and service ID (could be MD service on SolidFire). Generally these aren't that actionable but may be used to visualize client connectivity across cluster nodes.
 
 
-### QoS Histograms (`histogram_*`)
-
-I've tried hard to find a way to use this information, and haven't been successful so far. Histograms are by default disabled as I'm not certain of their usefulness, but you may enable them from the CLI (`-h`) and try to figure them out (histogram_below_min_iops_percentages and histogram_min_to_max_iops_percentages).
-
-Write block sizes visualized using Time Series:
-
-```sql
-SELECT "b_000512_to_004095", "b_004096_to_008191", "b_008192_to_016383", "b_016384_to_032767", "b_032768_to_65535", "b_065536_to_131071", "b_131072_plus" 
-  FROM "histogram_write_block_sizes" 
-  WHERE ("id"::tag = '134') AND $timeFilter 
-  GROUP BY "id"::tag
-```
-
-![Volume QoS Histogram - write block size for a volume](../images/sfc-example-dashboard-08-volume-qos-histograms-write-block-sizes.png)
-
-You can't see much unless you hover over the graph and then you'd see data points broken down by request size (0.5 to 4 KiB, 4-8 KiB, etc.). But you can see that one band or bucket (shown in yellow) occupies almost 50% of all IO. That's 4-8 KiB requests, and this client is (an idle) MS SQL Server 2022.
-
-This example is for Heatmap from the same QoS histogram.
-
-```sql
-SELECT last("b_01_to_19") 
-  AS "alias", last("b_20_to_39") 
-  AS "alias", last("b_40_to_59") 
-  AS "alias", last("b_60_to_79") 
-  AS "alias", last("b_80_to_100") 
-  AS "alias" FROM "histogram_below_min_iops_percentages" 
-  WHERE ("id"::tag = '134') AND $timeFilter 
-  GROUP BY time($__interval)
-```
-
-This is why I consider QoS Histograms experimental - until I understand what this below means, I see no point in collecting that data and wasting disk space. Deep-colored vertical orange bars mean most counts were low percentage numbers. But does that mean that most time was spent between Min and Max (histogram_min_to_max_iops_percentages) or that within time spent below Min IOPS, most of it was 01-19% of Min IOPS? I don't know.
-
-![Volume QoS Histogram - write block size for a volume](../images/sfc-example-dashboard-09-volume-qos-histograms-time-below-min-iops.png)
-
-### Snapshots (`snapshots`)
-
-TODO - not yet implemented. 
-
-There are two tasks here, one is plain snapshots (name, ID, retention, etc.) and the other is replicated snapshots, where there's more detail about replication relationship, replication delay, state, etc. 
-
-Pull requests are welcome.
-
 ### Sync jobs (`sync_jobs`)
 
 This one is "special". 
@@ -396,7 +353,7 @@ time                 blocks_per_sec cluster dst_volume_id elapsed_time pct_compl
 2024-06-15T15:22:44Z 60269          DR      11            6            0            0                 data  remote
 ```
 
-Fifth, the example above is for "time remaining". You may select other fields which may be more useful to you.
+Fifth, the example above is for "time remaining". You may select other fields which may be more useful to you. `blocks_per_sec` use 4 KiB units and I don't believe that 512e impacts this metric.
 
 ### Volume efficiency (`volume_efficiency`)
 
@@ -462,6 +419,25 @@ If you're interested in these details, see [this](https://scaleoutsean.github.io
 
 For the monitoring of initial replication sync ("baseline copy") we need to [use `ListSyncJobs`](https://scaleoutsean.github.io/2024/06/14/netapp-solidfire-replication-monitoring.html) which is available in [Sync jobs](#sync-jobs-sync_jobs).
 
+SFC also collects volume attributes set by Trident CSI. Note that other attributes (those that may be set by non-Trident CSI) are ignored, mostly because I haven't yet thought about how to handle them and estimate their impact on InfluxDB.
+
+The following InfluxQL query shows recent volume ID, size and name of PVCs created by Trident v24.06.0.
+
+```sql
+> SELECT id,total_size,va_docker_name,va_fstype,va_trident_version,va_trident_backend_uuid FROM volumes WHERE va_trident_version='24.06.0' AND time > (now()-10m)
+name: volumes
+time                 id  total_size va_docker_name                           va_fstype va_trident_version va_trident_backend_uuid
+----                 --  ---------- --------------                           --------- ------------------ -----------------------
+2024-07-03T07:51:35Z 176 2147483648 pvc-2435957e-cb7d-42fd-9f2e-d0c52700db7e xfs       24.06.0            8957837e-6a62-4f19-b158-2bb7cd143d93
+2024-07-03T07:51:35Z 178 2147483648 pvc-cea17a61-0017-4bd5-9623-0b2303d89630 raw       24.06.0            8957837e-6a62-4f19-b158-2bb7cd143d93
+```
+
+These values are all strings, so I'm not sure how they can be made useful in Grafana dashboards. 
+
+While they can be visualized in log-style Grafana panels, that doesn't seem particularly useful and for now the reference dashboard does not include any examples. If anyone has an idea of how to improve the format or field/tag assignment without bloating the measurement in terms of series cardinality and such, suggestions are welcome (use Issues).
+
+Volume attributes are expected to be useful in lookup and reporting of Trident CSI-provisioned volumes, including in the situations where Trident volumes are replicated to another cluster. Neither Trident CSI nor SolidFire provide a way to query volume attributes or create reports based on volume attributes, and the volumes measurement makes that possible for both single cluster and volumes replicated across different clusters.
+
 ### Volume performance (`volume_performance`)
 
 Volume performance metrics are what you'd expect. The API calls them volume stats.
@@ -521,3 +497,154 @@ Where 0 is used (e.g. async delay) is 0 seconds. To avoid confusion with volumes
 
 Note that replicated snapshots, which are asynchronously replicated as well, are their own "feature" and you can't see snapshot replication delay in volume performance metrics. See [Snapshots](#snapshots-snapshots).
 
+
+### Data and queries for experimental measurements
+
+While the details of all measurements are subject to change, these are more likely to be changed in terms of what's collected, what gets stored, and what's a tag vs. a field.
+
+#### QoS Histograms (`histogram_*`)
+
+QoS histograms are *not* collected by default. You may enable QoS histogram collection with a switch (`sfc.py -h`). 
+
+- histogram_below_min_iops_percentages
+- histogram_min_to_max_iops_percentages
+- histogram_read_block_sizes
+- histogram_target_utilization_percentage
+- histogram_throttle_percentages
+- histogram_write_block_sizes
+
+These metrics correspond to the names from the SolidFire API, so you can refer to the SolidFire documentation. 
+
+SFC changes names of histogram buckets to be Grafana-friendly, but it's easy to tell which SFC bucket name corresponds to the original bucket name from the original histogram object.
+
+I've tried hard to find a way to use this information, and haven't been successful so far. Histograms are by default disabled as I'm not certain of their usefulness, but you may enable them from the CLI (`-h`) and try to figure them out (histogram_below_min_iops_percentages and histogram_min_to_max_iops_percentages).
+
+Write block sizes visualized using Time Series:
+
+```sql
+SELECT "b_000512_to_004095", "b_004096_to_008191", "b_008192_to_016383", "b_016384_to_032767", "b_032768_to_65535", "b_065536_to_131071", "b_131072_plus" 
+  FROM "histogram_write_block_sizes" 
+  WHERE ("id"::tag = '134') AND $timeFilter 
+  GROUP BY "id"::tag
+```
+
+![Volume QoS Histogram - write block size for a volume](../images/sfc-example-dashboard-08-volume-qos-histograms-write-block-sizes.png)
+
+You can't see much unless you hover over the graph and then you'd see data points broken down by request size (0.5 to 4 KiB, 4-8 KiB, etc.). But you can see that one band or bucket (shown in yellow) occupies almost 50% of all IO. That's 4-8 KiB requests, and this client is (an idle) MS SQL Server 2022.
+
+This example is for Heatmap from the same QoS histogram.
+
+```sql
+SELECT last("b_01_to_19") 
+  AS "alias", last("b_20_to_39") 
+  AS "alias", last("b_40_to_59") 
+  AS "alias", last("b_60_to_79") 
+  AS "alias", last("b_80_to_100") 
+  AS "alias" FROM "histogram_below_min_iops_percentages" 
+  WHERE ("id"::tag = '134') AND $timeFilter 
+  GROUP BY time($__interval)
+```
+
+This is why I consider QoS Histograms experimental - until I understand what this below means, I see no point in collecting that data and wasting disk space. Deep-colored vertical orange bars mean most counts were low percentage numbers. But does that mean that most time was spent between Min and Max (histogram_min_to_max_iops_percentages) or that within time spent below Min IOPS, most of it was 01-19% of Min IOPS? I don't know.
+
+![Volume QoS Histogram - write block size for a volume](../images/sfc-example-dashboard-09-volume-qos-histograms-time-below-min-iops.png)
+
+
+#### Schedules (`schedules`)
+
+This "table" extracts a subset of information from `ListSchedules` responses.
+
+In InfluxDB initial implementation collects the following.
+
+Tags:
+
+- cluster
+- schedule_id
+- schedule_type
+
+Fields:
+
+- enable_remote_replication
+- enable_serial_creation
+- has_error
+- last_run_status
+- paused
+- recurring
+- run_next_interval
+- schedule_name
+- snapshot_name
+
+My guess is schedules don't change often, so the cost of having this information is low. It may not be very useful, but at least it allows users to view the details of their data protection without asking the administrator.
+
+#### Snapshots (`snapshots`)
+
+I tried many ways but couldn't easily create anything useful with these, no matter how I rearranged tags and fields. The initial implementation:
+
+Fields:
+
+- group_id          integer
+- new_snapshot_name string
+- volume_id         integer
+
+Tags:
+
+- cluster
+- enable_remote_replication
+- remote_status
+- snapshot_id
+- status
+- volume_name
+- volume_pair_uuid
+
+The problem with these - no matter how you arrange them (I've tried half a dozen ways) - is snapshot IDs change often as old snapshots expire and new get created, so no one is supposed to remember those.
+
+In Grafana, if you select the `snapshot_id` field, these change all the time, so viewing that now snapshot_id 759 is there whereas 2 days ago it was 740 doesn't really help. If we choose volume IDs instead, that's also useless, only in reverse (now you see volume ID 134 has snapshot ID 759 and two days ago it was 740).
+
+There are plenty of dates in the API response (create, expiration time) but I hesitate to collect those not knowing if there's a use case for that. It could be a lot of data (each volume may have 32 snapshots so with 1,00 volumes there may be 32,000 lines for each run), so I don't collect any of those dates until there's a use case for each additional tag or field.
+
+I haven't tried that, but it may be interesting to visualize `snapshot_id` growth differential (vs 24 hours ago) by volume ID. So if today you see that the number is 24 for volume ID 134 (i.e. 24 new snapshots have been replicated) and 0 for volume ID 135, you know those have failed to replicate or someone has paused or disabled that in snapshot schedule. 
+
+Data point examples: the Velero volume is a local snapshot (remote replication not enabled, *and* remote status is 0, so not replicated either). Group ID is 0, so that one isn't a part of a group. The second volume is part of `group-sql-snapshot`, is enabled for remote replication and there's a copy at the remote site (as expected, `volume_pair_uuid` shows this volume is paired, which is required in replication). (Both snapshots are of the same volume (sqldb), which is confusing but I was experimenting with Velero when I took it.)
+
+```sql
+> select * from snapshots
+name: snapshots
+time                 cluster enable_remote_replication group_id new_snapshot_name             remote_status snapshot_id status volume_id volume_name volume_pair_uuid
+----                 ------- ------------------------- -------- -----------------             ------------- ----------- ------ --------- ----------- ----------------
+2024-06-17T18:57:52Z PROD    0                         0        velero-vol-136-202404090609Z  0             438         1      136       sqldb       0
+2024-06-17T18:57:52Z PROD    1                         116      group-sql-snapshot            1             799         1      136       sqldb       fba6dc63-993c-4a62-b85b-cb4043f04aae
+
+```
+
+The best I could do in Grafana:
+
+```sql
+SELECT distinct("volume_id") FROM "snapshots" 
+  WHERE ("enable_remote_replication"::tag = '1' 
+  AND "remote_status"::tag = '1') 
+  AND $timeFilter 
+  GROUP BY time($__interval), "volume_name"::tag
+```
+
+![SFC - snapshot visualization](../images/sfc-example-dashboard-20-source-side-snapshots-with-remote-status.png)
+
+Volume properties show delay of async replication and whether snapshot has been replicated to the remote site, so if you want to monitor the progress or state, look at Volumes.
+
+#### Snapshot groups (`snapshot_groups`)
+
+Snapshot groups contain a digested subset of the API response because a lot of information in it isn't very suitable for visualization. 
+
+This InfluxDB query shows create time (since epoch), that remote replication is enabled (possible when the underlying volume is paired), expiration, number of 
+
+- `remote_grp_status` - 1 = Present (successfully replicated), other values = not present
+- `status` - 1 = Done (created), other values = not present
+
+```sql
+> select * from snapshot_groups
+name: snapshot_groups
+time                 cluster create_time enable_remote_replication expiration_time grp_snapshot_id grp_snapshot_id_1 grp_snapshot_name  members remote_grp_status status
+----                 ------- ----------- ------------------------- --------------- --------------- ----------------- -----------------  ------- ----------------- ------
+2024-07-04T09:36:34Z PROD    1720022400  1                         90000           133             133               group-sql-snapshot 3       1                 1
+2024-07-04T09:46:34Z PROD    1720022400  1                         90000           133             133               group-sql-snapshot 3       1                 1
+2024-07-04T10:02:53Z PROD    1720022400  1                         90000           133             133               group-sql-snapshot 3       1                 1
+```
