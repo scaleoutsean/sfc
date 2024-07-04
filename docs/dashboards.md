@@ -634,7 +634,7 @@ Volume properties show delay of async replication and whether snapshot has been 
 
 Snapshot groups contain a digested subset of the API response because a lot of information in it isn't very suitable for visualization. 
 
-This InfluxDB query shows create time (since epoch), that remote replication is enabled (possible when the underlying volume is paired), expiration, number of 
+This InfluxDB query shows create time (since epoch), that remote replication is enabled (possible when the underlying volume is paired), expiration, number of volumes in the group (here 3) and numeric code that the API returns as strings:
 
 - `remote_grp_status` - 1 = Present (successfully replicated), other values = not present
 - `status` - 1 = Done (created), other values = not present
