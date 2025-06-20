@@ -1,6 +1,7 @@
 # Change Log
 
 - [Change Log](#change-log)
+  - [Changes in v2.1.0](#changes-in-v210)
   - [Changes in v2.0.0](#changes-in-v200)
   - [Changes in v0.7.1](#changes-in-v071)
   - [Changes in v0.7](#changes-in-v07)
@@ -11,6 +12,12 @@
   - [Changes in .3](#changes-in-3)
   - [Changes in .v2](#changes-in-v2)
   - [Changes in .v1](#changes-in-v1)
+
+## Changes in v2.1.0
+
+- Database backend changed to InfluxDB 3 Core (tested with version 3.1 and Grafana v12.0)
+- Minor bug fixes and logging improvements
+- Minor dependency updates
 
 ## Changes in v2.0.0
 

@@ -1,87 +1,112 @@
 # SFC - SolidFire Collector (formerly SolidFire-related component in HCI Collector)
 
 - [SFC - SolidFire Collector (formerly SolidFire-related component in HCI Collector)](#sfc---solidfire-collector-formerly-solidfire-related-component-in-hci-collector)
-  - [About project and repository name change (HCI Collector to SFC)](#about-project-and-repository-name-change-hci-collector-to-sfc)
+  - [Architecture](#architecture)
+  - [Download](#download)
   - [Requirements](#requirements)
   - [Quick start](#quick-start)
     - [CLI](#cli)
-    - [Docker and orchestrators](#docker-and-orchestrators)
-  - [Alternatives to SFC](#alternatives-to-sfc)
-  - [FAQs](#faqs)
-  - [Architecture](#architecture)
-  - [Security](#security)
+    - [Containers](#containers)
+  - [Security notes](#security-notes)
     - [How to upload your TLS certificate to SolidFire](#how-to-upload-your-tls-certificate-to-solidfire)
     - [TLS certificates for OS and containers](#tls-certificates-for-os-and-containers)
-      - [OS/VM level](#osvm-level)
-      - [Containers](#containers)
+      - [TLS in OS/VM environments](#tls-in-osvm-environments)
+      - [TLS in containerized environments](#tls-in-containerized-environments)
     - [Create cluster admin with read \& reporting access](#create-cluster-admin-with-read--reporting-access)
   - [Data retention](#data-retention)
+  - [Getting started with InfluxDB 3](#getting-started-with-influxdb-3)
   - [Screenshots and demos](#screenshots-and-demos)
   - [Metrics](#metrics)
   - [Dependencies](#dependencies)
+  - [About project and repository name change (HCI Collector to SFC)](#about-project-and-repository-name-change-hci-collector-to-sfc)
+  - [Alternatives to SFC](#alternatives-to-sfc)
+  - [FAQs](#faqs)
   - [History of SFC](#history-of-sfc)
   - [License and Trademarks](#license-and-trademarks)
 
 
-SFC is a metrics collection script for SolidFire storage systems running Element OS v12.5 or newer v12.
+SFC is a metrics collection script for SolidFire storage systems running Element OS v12.5 or newer minor releases.
 
 
-## About project and repository name change (HCI Collector to SFC)
+## Architecture
 
-Prior to NetApp's acquisition of SolidFire SolidFire Collector gathered only SolidFire metrics. After that the project was expanded wth 3rd party packages for vSphere monitoring and renamed to HCI Collector. 
+![SFC architecture](./images/sfc-architecture.svg)
 
-With version 2.0.0 SFC returns to its original scope - completely rewritten and with big improvements over SFC from HCI Collector and earlier. [Here](#history-of-sfc) you may view more details about previous versions and contributors.
+You may use existing InfluxDB 3 instance or deploy a new one based on standard Docker Compose or Kubernetes templates for InfluxDB 3. SFC uses InfluxDB v3 with default configuration. 
 
-Latest NetApp HCI-focused version (HCI Collector v0.7.2) - can be found [here](https://github.com/scaleoutsean/sfc/tree/v0.7.2) for those who for some reason need it, but I wouldn't recommend it even to NetApp HCI users: for NetApp HCI I recommend using SFC v2 or one of the alternatives below and addressing vSphere (or KVM, Hyper-V, etc.) separately.
+Grafana has to be user-provided and dashboards created once InfluxDB is added as Grafana data source. See [dashboards](./docs/dashboards.md) for help with that.
+
+
+## Download
+
+```sh
+# release v2.0.0 uses InfluxDB 1
+git clone -b v2.0.0 https://github.com/scaleoutsean/sfc/
+# release v2.1.0  uses InfluxDB 3 and it's work-in-progress in master branch
+# git clone https://github.com/scaleoutsean/sfc/
+
+```
+
+- [Source code and documentation for previous release v2.0.0](https://github.com/scaleoutsean/sfc/tree/v2.0.0)
+- `master` branch contains source code and documentation for the upcoming v2.1.0
 
 
 ## Requirements
 
 - Environment
-  - SolidFire 12+ or equivalent (NetApp HCI, NetApp eSDS)
-  - Python 3.10-3.13 with module dependencies installed or a container platform that can run pre-packaged containers
-  - InfluxDB OSS v1
-  - Grafana 11 (older versions may work as well; SFC v2 has no direct or indirect connection to Grafana)
-- New hard requirements for SolidFire environments that did not exist in HCI Collector
-  - **Unique** volume names - this is not enforced by SolidFire API since volume IDs are unique by default. Most people don't use duplicate volume names because it's confusing, but if you happen to have duplicate volume names, don't use SFC
-  - Volume names must **not be be integers** - volume name should have at last one alphabet character at the beginning
-  - SFC no longer attempts to "solve" the problem of accepting invalid **TLS certificates**. If you want to use SFC v2, please deploy a valid certificate to your SolidFire or import your certificate chain to the OS or container SFC is running on. Or you can change the source code to get around the requirement for valid TLS certificates.
+  - SolidFire 12 (NetApp HCI, NetApp eSDS)
+  - Recent Python 3 (see `sfc/requirements.txt` for 2 main dependencies) on host or a container platform
+  - Recent InfluxDB 3 Core (3.0, 3.1)
+  - Recent Grafana (12, 11) - SFC v2 has no direct or indirect dependency on Grafana
+  - CPU and RAM requirements: SFC is expected to use around 2% CPU and 70MB RAM (hard limit 5% CPU, 100 MB RAM).
 
-The new "hard" requirements was introduced because neither volume IDs nor duplicate alphanumeric names make sense in dashboards that visualize more than a handful of volumes, which means almost 100% of users.
+- SolidFire
+  - **Unique** volume names - this is not enforced by the SolidFire API since it is volume IDs that are unique by default. Most people don't use duplicate volume names because it's confusing, but if you happen to have duplicate volume names, don't use SFC because it won't work well
+  - Volume names must **not be be integers** - volume name should have at last one alphabet character at the beginning (this is a fallback method to distinguish volume name from ID). The new "hard" requirements was introduced because neither volume IDs nor duplicate alphanumeric names make sense in dashboards that visualize more than a handful of volumes, which means almost 100% of users.
+  - SFC no longer attempts to "solve" the problem of invalid **TLS certificates**. If you want to use SFC v2, please deploy valid certificates to your SolidFire and InfluxDB and  or import your certificate chain to the OS or container SFC is running on. Or you can change the source code to get around the requirement for valid TLS certificates.
 
-This isn't a new, SFC-only idea. Various SolidFire integrations and automation tools for SolidFire have the same expectation (example: Ansible). If your environment has duplicate volume names, SFC may have errors or behave unpredictably, but you won't "lose SolidFire data" or anything like that; SFC only ever `read`s and `list`s SolidFire API objects. 
+SFC only ever `read`s and `list`s SolidFire API objects and doesn't attempt to connect to the Internet.
 
 
 ## Quick start
 
-- Create a read- and reporting-only admin account on SolidFire (see in [Security](#security) if you don't know how). If using existing InfluxDB, ask for access to a new `sfc` database. By default InfluxDB v1 allows creation of new databases and SFC automatically creates it if it does not exist, so you don't have to do anything in InfluxDB if you deploy your own using default container settings for InfluxDB OSS v1 - just make sure it's running and reachable by SFC. If InflxuDB is set to not allow database creation, then SFC will err as database won't be created and sending metrics to a non-existing database [doesn't work](https://docs.influxdata.com/influxdb/v1/guides/write_data/#writing-a-point-to-a-database-that-doesnt-exist)
+- Create a read- and reporting-only admin account on SolidFire (see in [Security](#security) if you don't know how). If using existing InfluxDB, ask for access to a new `sfc` database. By default InfluxDB 3.1 allows creation of new databases to bearers of admin token and SFC automatically creates one if it does not exist, so you don't have to do anything in InfluxDB if you deploy your own using default container settings for InfluxDB 3 - just make sure InfluxDB is running, reachable by SFC and that the InfluxDB API token is good. If InflxuDB is set to not allow database creation or the API token isn't allowed, then SFC will err as database won't be created and sending metrics to a non-existing database can't work
 - SFC:
   - Non-containerized (easier): install SFC's dependencies with Python pip (see requirements.txt), make sure TLS certificate on SolidFire is accepted (use curl or something to check) and run `sfc.py -h`.
-  - Containerized (harder): set variables (MVIP, USERNAME, etc.) in YAML or env var or file and deploy. **If your SolidFire does not have a valid TLS certificate**, you will need to copy it into the container to be visible to Python. Refer to generic Python-in-Docker instructions.
-- See [dashboards.md](./docs/dashboards.md) about visualization and metrics.
+  - Containerized (harder): set variables (MVIP, USERNAME, etc.) in YAML or .env var or file and deploy. **If your SolidFire does not or InfluxDB do not have a valid TLS certificate**, you will need to copy these (and the CA/IA certificate) into the container to be visible to Python. Refer to generic Python-in-Docker instructions.
+- See [dashboards.md](./docs/dashboards.md) about visualization, metrics and measurements (aka "tables")
 
 
 ### CLI
 
+**NOTE:** InfluxDB 3 defaults to port 8181 regardless of whether it's accessible over HTTP or HTTPS. sfc.py uses `https://` to connect to InfluxDB.
+
 ```sh
 git clone https://github.com/scaleoutsean/sfc
-cd sfc
+cd sfc/sfc
+python3 -m venv .venv
+source .venv/bin/activate
 python3 -m pip install -r requirements.txt
-# with InfluxDB OSS v1 at 192.168.50.184:32290, database 'sfc' will be automatically created by SFC
-python3 sfc.py --mvip 192.168.1.30 -u monitor -p ******* -ih 192.168.50.184 -ip 32290 -id sfc
+# With InfluxDB 3 at https://192.168.1.146:8181, valid TLS certs on SF and InfluxDB,
+#   InfluxDB database 'sfc' will be automatically created by SFC if InfluxDB Admin Token is valid 
+#   and Influx database 'sfc' does not exist
+python3 ./sfc.py --mvip 192.168.1.30 -u monitor -p ******* -ih 192.168.1.146 -ip 8181 -id sfc
 ```
 
 You can also try this, which should load SF_USERNAME and SF_PASSWORD from environment or prompt you to provide them:
 
 ```sh
-./sfc.py --mvip 192.168.1.30 -ih 192.168.50.184 -ip 32290 -id sfc
+(.venv) user@box:~/code/sfc/sfc$ ./sfc.py --mvip 192.168.1.30 -ih 192.168.1.146 -ip 8181 -id sfc
 ```
 
-If you want something different, try `-h` or hard-code argument values into script for a test run and try with just `python3 ./sfc.py` (and nothing else).
+If you want something different, try `-h` or hard-code argument values into script for a test run and try with just `python3 ./sfc/sfc.py` (and nothing else).
+
+After we descend to the `sfc` directory, create a venv and install modules from requirements.txt: 
 
 ```sh
-$ python ./sfc.py -h
-usage: sfc.py [-h] [-m [MVIP]] [-u [USERNAME]] [-p [PASSWORD]] [-ih [INFLUXDB_HOST]] [-ip [INFLUXDB_PORT]] [-id [INFLUXDB_NAME]] [-fh [HI]] [-fm [MED]] [-fl [LO]] [-ex] [-ll [{DEBUG,INFO,WARNING,ERROR,CRITICAL}]] [-lf [LOGFILE]]
+$ python3 ./sfc.py -h
+usage: sfc.py [-h] [-m [MVIP]] [-u USERNAME] [-p PASSWORD] [-ih [INFLUXDB_HOST]] [-ip [INFLUXDB_PORT]] [-id [INFLUXDB_NAME]] [-fh [HI]] [-fm [MED]] [-fl [LO]] [-ex] [-ll [{DEBUG,INFO,WARNING,ERROR,CRITICAL}]]
+              [-lf [LOGFILE]] [-c [CA_CHAIN]] [-v]
 
 Collects SolidFire metrics and sends them to InfluxDB.
 
@@ -92,11 +117,11 @@ options:
   -u USERNAME, --username USERNAME
                         username for SolidFire array. Default: SF_USERNAME
   -p PASSWORD, --password PASSWORD
-                        password for admin account on SolidFire cluster. Default: SF_PASSWORD.
+                        password for admin account on SolidFire cluster. Default: SF_PASSWORD or, if empty, prompt to provide it.
   -ih [INFLUXDB_HOST], --influxdb-host [INFLUXDB_HOST]
-                        host IP or name of InfluxDB. Default: 192.168.50.184
+                        host IP or name of InfluxDB. Default: 192.168.1.146
   -ip [INFLUXDB_PORT], --influxdb-port [INFLUXDB_PORT]
-                        port of InfluxDB. Default: 32290
+                        HTTPS port of InfluxDB. Default: 8181
   -id [INFLUXDB_NAME], --influxdb-name [INFLUXDB_NAME]
                         name of InfluxDB database to use. SFC creates it if it does not exist. Default: sfc
   -fh [HI], --frequency-high [HI]
@@ -110,59 +135,36 @@ options:
                         log level for console output. Default: INFO
   -lf [LOGFILE], --logfile [LOGFILE]
                         log file name. SFC logs only to console by default. Default: None
+  -c [CA_CHAIN], --ca-chain [CA_CHAIN]
+                        Optional filename with your (full) CA chain to be copied to the Ubuntu/Debian/Alpine OS certificate store. Users of other systems may import manually. Default: None
+  -v, --version         Show program version and exit.
 
 Author: @scaleoutSean https://github.com/scaleoutsean/sfc License: the Apache License 2.0
+
+
 ```
 
 
-### Docker and orchestrators
+### Containers
 
-Feel free to build your own with sfc.py in it, or use my Dockerfile from the sfc directory to build your SFC container.
+Feel free to build your own with `sfc.py` in it, or use my Dockerfile from the sfc sub-directory to build your SFC container.
 
 Or you can try this command using pre-built container, but **this will not work** if you don't have a valid TLS certificate on SolidFire MVIP! If you're using internal or self-signed CA, scroll down to Security section for a working recipe.
 
 ```sh
-docker run --name=sfc docker.io/scaleoutsean/sfc:v2.0.0 --mvip 192.168.1.30 -u monitor -p ********** -ih 192.168.50.184 -ip 32290 -id sfc
+docker run --name=sfc docker.io/scaleoutsean/sfc:v2.1.0 --mvip 192.168.1.30 -u monitor -p ********** -ih 192.168.1.146 -ip 8181 -id sfc
 ```
 
 Why is this so complicated now? 
 
-Because SFC container built by *me* does not have *your* internal certificate or CA chain, so there's no way for me to make this problem go away except by making it possible to accept invalid certificates, which SFC v2 won't do. 
+Because SFC container built by *me* does not have *your* internal certificate or CA chain, so there's no way for me to make this problem go away except by making it possible to accept invalid certificates, which SFC v2 won't do.
 
 
-## Alternatives to SFC
-
-- [SolidFire Exporter](https://github.com/mjavier2k/solidfire-exporter/) - Prometheus exporter
-  - Exports "general" SolidFire metrics with (currently) a single schedule for all, potentially may not scale as well as SFC v2
-  - [Getting started with SolidFire Exporter](https://scaleoutsean.github.io/2021/03/09/get-started-with-solidfire-exporter.html)
-- SolidFire syslog forwarding to Elasticsearch or similar platform 
-  - Detailed [steps](https://scaleoutsean.github.io/2021/10/18/solidfire-syslog-filebeat-logstash-elk-stack.html)
-  - Requires more work to set up, but provides a path to both log and metrics collection
-- NetApp Cloud Insights
-  - As-a-service offering free up to 7 day retention and paid above that
-  - Control plane in the cloud, basic metrics, no customization options
-
-
-## FAQs
-
-I no longer maintain the SFC FAQs in this repo because I've never heard that anyone has the FAQs for HCI Collector v0.7.
-
-Last version of old FAQs page for the NetApp HCI/vSphere-focused v0.7.x can be found [here](https://github.com/scaleoutsean/sfc/tree/v0.7.2/docs).
-
-
-## Architecture
-
-![SFC architecture](./images/sfc-architecture.svg)
-
-You may use existing InfluxDB v1 instance or deploy a new one based on standard Docker Compose or Kubernetes templates for InfluxDB v1. SFC uses InfluxDB v1 with default configuration. 
-
-Grafana has to be user-provided and dashboards created once InfluxDB is added as Grafana data source. See [dashboards](./docs/dashboards.md) for help with that.
-
-
-## Security
+## Security notes
 
 - SolidFire TLS certificate
-  - As mentioned above, going forward SFC won't assist users in circumventing HTTPS security. SFC may or may not reject invalid TLS certificates, but when it does that would not be considered a bug or issue for SFC to solve. If your SolidFire MVIP uses FQDN and has has a valid TLS certificate, at the very least you can run SFC out of a VM - just import TLS certificates so that Python can find them and that's it. Users of containerized SFC may need to prepare their SolidFire's certificate chain *or* certificate fingerprint of a self-signed SolidFire TLS (including those that use an IP address)
+  - As mentioned above, going forward SFC won't assist users in circumventing HTTPS security. SFC may or may not reject invalid TLS certificates, but when it does that would not be considered a bug or issue for SFC to solve. If your SolidFire MVIP uses FQDN and has has a valid TLS certificate, at the very least you can run SFC out of a VM - just import SolidFire TLS certificates to OS truststore so that Python can find them and that's it. Users of containerized SFC may need to prepare their SolidFire's certificate chain *or* certificate fingerprint of a self-signed SolidFire TLS (including those that use an IP address)
+  - PowerShell script that uploads/refreshes TLS certificate can be found [here](https://github.com/scaleoutsean/awesome-solidfire/blob/master/scripts/updateTlsCertificate.ps1)
 - SolidFire account used by SFC
   - If you want decent account security in SFC, use a dedicated SolidFire admin account with a Reporting-only (Read-only) role. Even the Reporting-only role has access to sensitive information (initiator and target passwords of your storage accounts are, well, read when account properties are queried, for example), but at least it cannot make modifications to SolidFire data (it only can `Get` and `List` API objects) so it can't change passwords to lock you out, or delete something. As a reminder, the sensitive information that read-only admin accounts can read if the password leaks is storage accounts' CHAP secrets, so you still need to guard it carefully
   - Where "sensitive" API methods are used (ListAccounts, for example), SFC removes CHAP credentials from the API response even though they are not used in any way (e.g. they are not sent to metrics database), but that lowers the risk of those secrets ending up in memory/kernel dump files
@@ -170,13 +172,17 @@ Grafana has to be user-provided and dashboards created once InfluxDB is added as
   - Docker Compose: SFC container configuration files may contain plain text passwords to the SolidFire API (also for the Web UI, since the username/password can be used for that purpose as well). You can consider using ENV variables, but you have to load them from somewhere, so that isn't much better. Still, if you do that, make sure they're not readable by others. If you have a vault service you can configure SFC container to get the password from vault service
   - Kubernetes and Nomad: SFC containers can use Kubernetes secrets or other source if you configure them
 - SFC host/VM/container
-  - Ensure that only administrator-level staff has access to your SFC host/VM/container namespace because of SFC account security and possibly .env file
+  - Ensure that only administrator-level staff has access to your SFC host/VM/container namespace because of SFC account security and the possible .env file
   - Create a new user for SFC and limit access to .env and sfc.py to only that account. Better yet, use a vault service or Kubernetes secrets (not ideal, but probably better than plain text passwords in a VM)
   - Because SFC only needs to connect to SolidFire MVIP, host/VM/container can be connected only to SolidFire management network. sfc.py does not provide any external-facing service
 - Network
   - SFC only connects to SolidFire to gather metrics which are then sent to InfluxDB. No other connections are required. SFC never attempts to connect to the Internet
 - 3rd party containers and packages
+- InfluxDB
+  - Version 3.0 only supported admin tokens. Resource token support is being added, and ideally "database token" should be used for reading (Grafana, SFC, CLIs) and writing (SFC) data to InfluxDB. Multiple SFC instances could securely share one InfluxDB data base server if each SFC used a different database token. HTTP is possible, but SFC does not use that option
+  - Optional S3 service for InfluxDB data tiering should also use HTTPS and proper TLS certificates
   - Upstream containers (SFC base image, InfluxDB) are not audited or regularly checked for vulnerabilities by me. SFC doesn't run any external-facing service and InfluxDB is only accessed by Grafana. But feel free to inspect/update them on your own and use your own Influx and Grafana instances. SFC is built with fairly minimal dependencies, so that users can address vulnerabilities in 3rd party packages on their own
+  - All SFC measurements are tagged with the SolidFire cluster name so multiple SFC instances can share the same InfluxDB database if shared access isn't a concern
 
 ### How to upload your TLS certificate to SolidFire
 
@@ -188,13 +194,13 @@ With SolidFire's certificate chain on the host available to SFC, even a self-sig
 
 ### TLS certificates for OS and containers
 
-This used to be "solved" by accepting whatever, but in 2024 that's no longer good enough. I don't have *your* valid or invalid certificate, so I can't "solve" it in SFC for you. 
+This used to be "solved" by accepting whatever, but now that's no longer good enough. I don't have *your* valid or invalid certificate, so I can't "solve" it in SFC for you. 
 
 Python (and by extension, SFC) needs to be able to validate SolidFire's TLS certificate. 
 
 This has nothing to do with SFC, so please figure it out for your OS or container and [this is a great place to start](https://stackoverflow.com/a/39358282). A summary is offered below for your convenience.
 
-#### OS/VM level
+#### TLS in OS/VM environments
 
 Python should reference OS CA locations so if you add certificates so that `openssl` works, Python (and SFC) may too. [(source)](https://stackoverflow.com/a/66258111).
 
@@ -220,14 +226,14 @@ Certificate chain
 
 ```
 
-#### Containers
+#### TLS in containerized environments
 
-Validated Docker Compose and Kubernetes recipes are a TODO item, so for now please try these instructions or use a VM. 
+Docker Compose and Kubernetes recipes are a TODO item, so for now please try these instructions or use a VM. 
 
 How to tell if you have a problem:
 
 ```sh
-$ docker run --name=sfc docker.io/scaleoutsean/sfc:v2.0.0 --mvip 192.168.1.30 -u monitor -p ********** -ih 192.168.50.184 -ip 32290 -id sfc
+$ docker run --name=sfc docker.io/scaleoutsean/sfc:v2.0.0 --mvip 192.168.1.30 -u monitor -p ********** -ih 192.168.1.146 -ip 8181 -id sfc
 Exception: Cannot connect to host 192.168.1.30:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1007)')]
 ```
 
@@ -263,26 +269,32 @@ Notes:
 - The minimum password length is 8 characters, but you should use a complex password (24+).
 - This account does not have to be local to SolidFire - LDAP/ADS is available as well, but I don't have these services so I haven't tried. Please check the documentation for more on that and mind password rotation rules in LDAP/ADS if you use this option
 
-
 ![Reporting-only admin account on SolidFire](./images/solidfire-reporting-read-only-account-in-web-ui.png)
 
 
 ## Data retention
 
-Currently it is set to 31 days because down-sampling hasn't been implemented yet.
+InfluxDB 3 - starting with v3.2 - should be able to make retention configuration easy. Data tiering has been available since 3.0, so you have two options to economize:
 
-SFC v2 aims to save resources. A SolidFire Demo VM (1 node, 4 disks, 32 volumes) made InfluxDB grow by less than 1 MB/day. Physical SolidFire cluster that creates 20 MB/day will still generate only 600 MB per month. Most SFC deployments should not consume more than 1 GB in on-disk space for InfluxDB.
+- Data tiering (available since v3.0). Use any S3 bucket that works with InfluxDB 3
+- Data retention and down-sampling (retention may become available in version 3.2 later this month)
+- Plus some more related to caching (especially if you also tier to S3)
 
-If you need longer retention and don't know how to implement down-sampling in InfluxDB v1, you may simply change it in the code and remove InfluxDB container data (to let SFC re-create the DB with longer retention), just remember that 90 days of 1 minute metrics adds up for InfluxDB, Grafana and your browser. For example, showing a visualization 30 days of all metrics may require the entire database to be read off disk.
+Other than that, SFC v2 aims to save resources. Usually it's idle, with 50MB RAM (resident memory size) and 0% CPU utilization; on every metrics collection CPU briefly goes to 1-2%.
 
-HCI Collector used Graphite database in which data down-sampling was trivial. In InfluxDB it sucks for multiple reasons: for example, averaging can easily result in meaningless down-sampled data, and Grafana dashboards can't easily handle down-sampled data either.
+A SolidFire Demo VM (1 node, 4 disks, 32 volumes) made InfluxDB grow by less than 1 MB/day. Physical SolidFire cluster that creates 20 MB/day will still generate only 600 MB per month. Most SFC deployments should not consume more than 1 GB in on-disk space for InfluxDB.
 
-If you need longer retention and I may take a look at this again, let me know in Issues. The plan is to start using InfluxDB v3 as soon as it hits public beta - hopefully before end of calendar year 2024 - which should work better given how trivial SFC workload is. 
+SFC v2.0 had 31 day retention and no down-sampling because InfluxDB v1 made that too much trouble. If you have problems with disk utilization, you may want to consider SFC v2.1.0.
+
+
+## Getting started with InfluxDB 3
+
+I have a [post](https://scaleoutsean.github.io/2025/01/24/influxdb-3-core-alpha.html) about InfluxDB from the time it was in alpha. Some things have changed since then, but I've uploaded the post twice, so it's reasonably accurate for version 3.1.
 
 
 ## Screenshots and demos
 
-SFC v2.0 no longer includes Grafana dashboards, but there's a sample of a dashboard with documented InfluxQL queries.
+SFC v2 no longer includes Grafana dashboards, but there's a sample of a dashboard with documented InfluxQL queries.
 
 See [dashboards.md](./docs/dashboards.md) on how to get started. [dashboard.json](./docs/dashboard.json) contains dashboard code for this sample screenshot (it assumes the InfluxDB source in Grafana is named `sfc`).
 
@@ -312,9 +324,38 @@ SFC attempts to put and end to that and should be able to handle clusters with 1
 
 ## Dependencies 
 
-SFC v2.0.0 attempts to minimize the use of external modules. Future v2 releases may take a more relaxed approach than v2.0.0, but the goal is to keep SFC simple, small, fast and secure.
+SFC v2 attempts to minimize the use of external modules. My goal is to keep SFC simple, small, fast and secure.
 
 Compared to previous version (HCI Collector v0.7), two top-level external libraries were removed and two added. Two main top-level dependencies are now APScheduler (for smarter scheduling) and aiohttp (the latter includes its own dependencies; you may view them with `pip list`, of course).
+
+
+## About project and repository name change (HCI Collector to SFC)
+
+Prior to NetApp's acquisition of SolidFire SolidFire Collector gathered only SolidFire metrics. After that the project was expanded wth 3rd party packages for vSphere monitoring and renamed to HCI Collector. 
+
+Starting with version 2.0.0 SFC returned to its original mission - completely rewritten and with big improvements over SFC from HCI Collector and earlier. [Here](#history-of-sfc) you may view more details about previous versions and contributors.
+
+Latest NetApp HCI-focused version (HCI Collector v0.7.2) - can be found [here](https://github.com/scaleoutsean/sfc/tree/v0.7.2) for those who for some reason need it, but I wouldn't recommend it even to NetApp HCI users: for NetApp HCI I recommend using SFC v2 or one of the alternatives below and addressing vSphere (or KVM, Hyper-V, etc.) separately.
+
+
+## Alternatives to SFC
+
+- [SolidFire Exporter](https://github.com/mjavier2k/solidfire-exporter/) - Prometheus exporter
+  - Exports "general" SolidFire metrics with (currently) a single schedule for all, potentially may not scale as well as SFC v2
+  - [Getting started with SolidFire Exporter](https://scaleoutsean.github.io/2021/03/09/get-started-with-solidfire-exporter.html)
+- SolidFire syslog forwarding to Elasticsearch or similar platform 
+  - Detailed [steps](https://scaleoutsean.github.io/2021/10/18/solidfire-syslog-filebeat-logstash-elk-stack.html)
+  - Requires more work to set up, but provides a path to both log and metrics collection
+- NetApp Cloud Insights
+  - As-a-service offering free up to 7 day retention and paid above that
+  - Control plane in the cloud, basic metrics, no customization options
+
+
+## FAQs
+
+I no longer maintain the SFC FAQs in this repo because I've never heard that anyone has the FAQs for HCI Collector v0.7.
+
+Last version of old FAQs page for the NetApp HCI/vSphere-focused v0.7.x can be found [here](https://github.com/scaleoutsean/sfc/tree/v0.7.2/docs).
 
 
 ## History of SFC
@@ -330,7 +371,7 @@ I started contributing in 2019 and took over as the sole maintainer before v0.7.
 - SolidFire Graphite Collector before NetApp's acquisition of SolidFire:
   - solidfire-graphite-collector.py - original SolidFire collector script by "cbiebers" (the Github account and repo were deleted at some point so I can't provide the URLs)
 
-See [CHANGELOG.md](./CHANGELOG.md) for more details on HCI Collector and SFC software changes.
+See [CHANGELOG.md](./CHANGELOG.md) for more details about the HCI Collector and SFC software changes.
 
 I sometimes [blog about SolidFire](http://scaleoutsean.github.io) and maintain curated SolidFire resources such as [Awesome SolidFire](http://github.com/scaleoutsean/awesome-solidfire), where you can find pointers to various SolidFire content and simple Python and PowerShell scripts.
 

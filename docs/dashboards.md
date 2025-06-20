@@ -28,37 +28,49 @@
       - [Schedules (`schedules`)](#schedules-schedules)
       - [Snapshots (`snapshots`)](#snapshots-snapshots)
       - [Snapshot groups (`snapshot_groups`)](#snapshot-groups-snapshot_groups)
-
+- [List of Influx tables in SFC](#list-of-influx-tables-in-sfc)
+  - [Table: account\_efficiency](#table-account_efficiency)
+  - [Table: accounts](#table-accounts)
+  - [Table: cluster\_capacity](#table-cluster_capacity)
+  - [Table: cluster\_faults](#table-cluster_faults)
+  - [Table: cluster\_performance](#table-cluster_performance)
+  - [Table: cluster\_version](#table-cluster_version)
+  - [Table: drive\_stats](#table-drive_stats)
+  - [Table: node\_performance](#table-node_performance)
+  - [Table: volume\_efficiency](#table-volume_efficiency)
+  - [Table: volume\_performance](#table-volume_performance)
+  - [Table: volumes](#table-volumes)
 
 ## Grafana version
 
-Grafana v11.0.0 was used in the development of SFC v2, but SFC has no dependencies or plugins that depend on Grafana 11.
+Grafana v12.0 was used in the development of SFC v2.1, but SFC has no dependencies or plugins that depend on Grafana 12 or its plugins.
 
-Several recent Grafana major versions support InfluxDB v1 and since SFC doesn't come with dashboards, any recent version ought to work. All it needs is to connect to InfluxDB v1.
-
-If reference dashboard or queries don't work with latest release of grafana, please import the dashboard and try different panel settings or queries. 
-
+If reference dashboard or queries don't work with latest release of Grafana, please import the dashboard and try different panel settings or queries. 
 
 ### Grafana Data Source
 
-How to create an InfluxDB source in Grafana 11:
+How to create an InfluxDB source in Grafana 12:
 
 - Go to `Sources` > `Add data source`
-- Pick `InfluxDB`
+- Pick `InfluxDB` and `InfluxQL` (unless you prefer `SQL` which I haven't tested)
 - Give the new source a name such as `sfc` (for SolidFire Collector)
-- Query language: `InfluxQL` (for InfluxDB v1)
-- `HTTP` > `URL`: if InfluxDB is running locally, `http://localhost:8086`, in Docker Compose you may use `http://influxdb:8086`, if elsewhere then `http://some.host.com.org:58086`, etc.
+- `HTTP` > `URL`: if InfluxDB is running on same OS, `https://localhost:8181`, if in Kubernetes or Docker Compose you may use `https://influxdb:8181`, if elsewhere then maybe `https://FQDN` or `https://some.host.com.org:58086`, etc. You *may* fall back to HTTP, and disable TLS validation if using a "snake oil" TLS certificate, but then sfc.py also has to be changed to use HTTP.
+- You must get API token and configure Headers
 - Scroll all the way to the bottom, click `Save & Test`
 
-You *may* add other complex settings and secure InfluxDB, but SFC is written with the idea that it connects to InfluxDB within same Kubernetes or Docker namespace or same host, so you may need to modify SFC to use HTTP(S) and/or add authentication when connecting InfluxDB. I expect most SFC users will use Docker Compose, Kubernetes or local VM, where HTTP is fine.
+Top of the page:
 
+![InfluxDB data source setup screen 1](../images/grafana-12-with-influxdb-3-data-source-01.png)
+
+Bottom:
+
+![InfluxDB data source setup screen 2](../images/grafana-12-with-influxdb-3-data-source-02.png)
 
 ### Aliasing or replacing Grafana's labels
 
 Certain parts of Grafana are hard to use.
 
 Personally I find the difficulty of aliasing data in labels the worst. Below in Account Efficiency, there's an example on how to do that. The same general technique works for other metrics below. The Grafana Web site and Community have additional approaches and workarounds.
-
 
 ### Overcoming long updates of certain measurements
 
@@ -121,6 +133,8 @@ Some queries here and also in reference [dashboard.json](./dashboard.json) have 
 Some queries are set to use `last`, others `mean`. In some cases `last` is used because that's what I wanted while working on SFC. For example, in cluster faults I don't want `mean` of 0s (no problem) and 1s (unresolved fault). Where `mean` is used it may be only because that's what Grafana does by default. In other cases maybe I have `last` simply because I wanted to see if the code was working properly, but normally I'd use `mean`. And finally, there may be cases where you'd want something different, so feel free to modify any and all queries to suit your needs.
 
 Reference dashboard contains all queries mentioned below, so you don't need to copy-paste them into Grafana if you import my dashboard and set it to your source. If any of the queries below doesn't work (maybe I made typo while formatting, etc.), you can get it from dashboard.json since that file is dumped from Grafana without any changes.
+
+**NOTE:** measurements ("tables") with low and medium collection frequency won't be created until those run for the first time and find something to report. It may take up to one hour for those measurements to appear in InfluxDB and become query-able in Grafana.
 
 ### Account efficiency (`account_efficiency`)
 
@@ -318,6 +332,7 @@ This example shows milliseconds since last client's SCSI command, which Windows 
 
 There are 2-3 other metrics such as session instance and service ID (could be MD service on SolidFire). Generally these aren't that actionable but may be used to visualize client connectivity across cluster nodes.
 
+If there are no iSCSI connections, the table aka "measurement" will not be created until iSCSI connections appear and get recorded in the next medium-frequency run.
 
 ### Sync jobs (`sync_jobs`)
 
@@ -578,7 +593,11 @@ My guess is schedules don't change often, so the cost of having this information
 
 #### Snapshots (`snapshots`)
 
-I tried many ways but couldn't easily create anything useful with these, no matter how I rearranged tags and fields. The initial implementation:
+The main problem with snapshots is this: imagine a small cluster with 4 nodes and 400 volumes per node, each with 32 snapshots. That's up to 51,200 entries per each collection run. 
+
+Then there are other problems (such as which of the many details to keep and how, etc.).
+
+I've tried many ways but couldn't easily create anything useful with these, no matter how I rearranged tags and fields. The initial implementation:
 
 Fields:
 
@@ -632,9 +651,9 @@ Volume properties show delay of async replication and whether snapshot has been 
 
 #### Snapshot groups (`snapshot_groups`)
 
-Snapshot groups contain a digested subset of the API response because a lot of information in it isn't very suitable for visualization. 
+Snapshot groups contain a digested subset of the API response because a lot of information in it isn't very suitable for visualization and bloats the database.
 
-This InfluxDB query shows create time (since epoch), that remote replication is enabled (possible when the underlying volume is paired), expiration, number of volumes in the group (here 3) and numeric code that the API returns as strings:
+This InfluxDB query shows create time (since epoch), that remote replication is enabled (possible when the underlying volume is paired), expiration (90K seconds from create_time), the number of volumes in the group (here 3) and numeric code that the API returns as strings:
 
 - `remote_grp_status` - 1 = Present (successfully replicated), other values = not present
 - `status` - 1 = Done (created), other values = not present
@@ -648,3 +667,409 @@ time                 cluster create_time enable_remote_replication expiration_ti
 2024-07-04T09:46:34Z PROD    1720022400  1                         90000           133             133               group-sql-snapshot 3       1                 1
 2024-07-04T10:02:53Z PROD    1720022400  1                         90000           133             133               group-sql-snapshot 3       1                 1
 ```
+
+# List of Influx tables in SFC
+
+- Quite a few camel-cased keys that should be changed, but this is how it is now.
+- Some tables may not be shown here due to certain features not being used (e.g. replication, (snapshot) schedules). You may find them in sfc.py or list the tables by yourself if they get populated by your SFC instance that uses them.
+
+## Table: account_efficiency
+
+
+Query: SHOW FIELD KEYS FROM account_efficiency
+
+```raw
++--------------------+--------------------+-----------+
+| iox::measurement   | fieldKey           | fieldType |
++--------------------+--------------------+-----------+
+| account_efficiency | compression        | float     |
+| account_efficiency | deduplication      | float     |
+| account_efficiency | storage_efficiency | float     |
+| account_efficiency | thin_provisioning  | float     |
++--------------------+--------------------+-----------+
+
+```
+
+Query: SHOW TAG KEYS FROM account_efficiency
+
+```raw
++--------------------+---------+
+| iox::measurement   | tagKey  |
++--------------------+---------+
+| account_efficiency | cluster |
+| account_efficiency | id      |
+| account_efficiency | name    |
++--------------------+---------+
+
+```
+## Table: accounts
+
+
+Query: SHOW FIELD KEYS FROM accounts
+
+```raw
++------------------+--------------+-----------+
+| iox::measurement | fieldKey     | fieldType |
++------------------+--------------+-----------+
+| accounts         | active       | integer   |
+| accounts         | volume_count | integer   |
++------------------+--------------+-----------+
+
+```
+
+Query: SHOW TAG KEYS FROM accounts
+
+```raw
++------------------+---------+
+| iox::measurement | tagKey  |
++------------------+---------+
+| accounts         | cluster |
+| accounts         | id      |
+| accounts         | name    |
++------------------+---------+
+
+```
+## Table: cluster_capacity
+
+
+Query: SHOW FIELD KEYS FROM cluster_capacity
+
+```raw
++------------------+----------------------------------+-----------+
+| iox::measurement | fieldKey                         | fieldType |
++------------------+----------------------------------+-----------+
+| cluster_capacity | active_block_space               | integer   |
+| cluster_capacity | active_sessions                  | integer   |
+| cluster_capacity | average_iops                     | integer   |
+| cluster_capacity | cluster_recent_io_size           | integer   |
+| cluster_capacity | compressioN_factor               | float     |
+| cluster_capacity | current_iops                     | integer   |
+| cluster_capacity | dedupe_factor                    | float     |
+| cluster_capacity | max_iops                         | integer   |
+| cluster_capacity | max_overprovisionable_space      | integer   |
+| cluster_capacity | max_provisioned_space            | integer   |
+| cluster_capacity | max_used_metadata_space          | integer   |
+| cluster_capacity | max_used_space                   | integer   |
+| cluster_capacity | non_zero_blocks                  | integer   |
+| cluster_capacity | peak_active_sessions             | integer   |
+| cluster_capacity | peak_iops                        | integer   |
+| cluster_capacity | provisioned_space                | integer   |
+| cluster_capacity | snapshot_non_zero_blocks         | integer   |
+| cluster_capacity | storage_efficiency               | float     |
+| cluster_capacity | thin_factor                      | float     |
+| cluster_capacity | total_ops                        | integer   |
+| cluster_capacity | unique_block_space               | integer   |
+| cluster_capacity | unique_blocks                    | integer   |
+| cluster_capacity | used_block_space                 | integer   |
+| cluster_capacity | used_metadata_space_in_snapshots | integer   |
+| cluster_capacity | used_space                       | integer   |
+| cluster_capacity | zero_blocks                      | integer   |
++------------------+----------------------------------+-----------+
+
+```
+
+Query: SHOW TAG KEYS FROM cluster_capacity
+
+```raw
++------------------+--------+
+| iox::measurement | tagKey |
++------------------+--------+
+| cluster_capacity | name   |
++------------------+--------+
+
+```
+## Table: cluster_faults
+
+
+Query: SHOW FIELD KEYS FROM cluster_faults
+
+```raw
++------------------+---------------+-----------+
+| iox::measurement | fieldKey      | fieldType |
++------------------+---------------+-----------+
+| cluster_faults   | bestPractices | integer   |
+| cluster_faults   | critical      | integer   |
+| cluster_faults   | error         | integer   |
+| cluster_faults   | warning       | integer   |
++------------------+---------------+-----------+
+
+```
+
+Query: SHOW TAG KEYS FROM cluster_faults
+
+```raw
++------------------+---------+
+| iox::measurement | tagKey  |
++------------------+---------+
+| cluster_faults   | cluster |
+| cluster_faults   | total   |
++------------------+---------+
+
+```
+## Table: cluster_performance
+
+
+Query: SHOW FIELD KEYS FROM cluster_performance
+
+```raw
++---------------------+-------------------------+-----------+
+| iox::measurement    | fieldKey                | fieldType |
++---------------------+-------------------------+-----------+
+| cluster_performance | actual_iops             | integer   |
+| cluster_performance | average_iops            | integer   |
+| cluster_performance | client_queue_depth      | integer   |
+| cluster_performance | cluster_utilization     | float     |
+| cluster_performance | latency_usec            | integer   |
+| cluster_performance | normalized_iops         | integer   |
+| cluster_performance | read_bytes_last_sample  | integer   |
+| cluster_performance | read_latency_usec       | integer   |
+| cluster_performance | read_ops_last_sample    | integer   |
+| cluster_performance | write_bytes_last_sample | integer   |
+| cluster_performance | write_latency_usec      | integer   |
+| cluster_performance | write_ops_last_sample   | integer   |
++---------------------+-------------------------+-----------+
+
+```
+
+Query: SHOW TAG KEYS FROM cluster_performance
+
+```raw
++---------------------+--------+
+| iox::measurement    | tagKey |
++---------------------+--------+
+| cluster_performance | name   |
++---------------------+--------+
+
+```
+## Table: cluster_version
+
+
+Query: SHOW FIELD KEYS FROM cluster_version
+
+```raw
++------------------+-------------+-----------+
+| iox::measurement | fieldKey    | fieldType |
++------------------+-------------+-----------+
+| cluster_version  | api_version | float     |
++------------------+-------------+-----------+
+
+```
+
+Query: SHOW TAG KEYS FROM cluster_version
+
+```raw
++------------------+---------+
+| iox::measurement | tagKey  |
++------------------+---------+
+| cluster_version  | name    |
+| cluster_version  | version |
++------------------+---------+
+
+```
+## Table: drive_stats
+
+
+Query: SHOW FIELD KEYS FROM drive_stats
+
+```raw
++------------------+----------------------+-----------+
+| iox::measurement | fieldKey             | fieldType |
++------------------+----------------------+-----------+
+| drive_stats      | activeSessions       | integer   |
+| drive_stats      | iosInProgress        | integer   |
+| drive_stats      | lifeRemainingPercent | integer   |
+| drive_stats      | powerOnHours         | integer   |
++------------------+----------------------+-----------+
+
+```
+
+Query: SHOW TAG KEYS FROM iscsi_sessions
+
+```raw
++------------------+----------------------+
+| iox::measurement | tagKey               |
++------------------+----------------------+
+| iscsi_sessions   | account_id           |
+| iscsi_sessions   | account_name         |
+| iscsi_sessions   | auth_method          |
+| iscsi_sessions   | chap_algorithm       |
+| iscsi_sessions   | chap_username        |
+| iscsi_sessions   | cluster              |
+| iscsi_sessions   | initiator_alias      |
+| iscsi_sessions   | initiator_id         |
+| iscsi_sessions   | initiator_ip         |
+| iscsi_sessions   | initiator_name       |
+| iscsi_sessions   | initiator_session_id |
+| iscsi_sessions   | node_id              |
+| iscsi_sessions   | target_ip            |
+| iscsi_sessions   | target_name          |
+| iscsi_sessions   | virtual_network_id   |
+| iscsi_sessions   | volume_id            |
++------------------+----------------------+
+
+```
+
+
+Query: SHOW TAG KEYS FROM drive_stats
+
+```raw
++------------------+---------+
+| iox::measurement | tagKey  |
++------------------+---------+
+| drive_stats      | cluster |
+| drive_stats      | id      |
++------------------+---------+
+
+```
+## Table: node_performance
+
+
+Query: SHOW FIELD KEYS FROM node_performance
+
+```raw
++------------------+-----------------------------+-----------+
+| iox::measurement | fieldKey                    | fieldType |
++------------------+-----------------------------+-----------+
+| node_performance | cpu                         | integer   |
+| node_performance | network_utilization_cluster | integer   |
+| node_performance | network_utilization_storage | integer   |
++------------------+-----------------------------+-----------+
+
+```
+
+Query: SHOW TAG KEYS FROM node_performance
+
+```raw
++------------------+---------+
+| iox::measurement | tagKey  |
++------------------+---------+
+| node_performance | cluster |
+| node_performance | id      |
++------------------+---------+
+
+```
+## Table: volume_efficiency
+
+
+Query: SHOW FIELD KEYS FROM volume_efficiency
+
+```raw
++-------------------+--------------------+-----------+
+| iox::measurement  | fieldKey           | fieldType |
++-------------------+--------------------+-----------+
+| volume_efficiency | compression        | float     |
+| volume_efficiency | deduplication      | float     |
+| volume_efficiency | storage_efficiency | float     |
+| volume_efficiency | thin_provisioning  | float     |
++-------------------+--------------------+-----------+
+
+```
+
+Query: SHOW TAG KEYS FROM volume_efficiency
+
+```raw
++-------------------+---------+
+| iox::measurement  | tagKey  |
++-------------------+---------+
+| volume_efficiency | cluster |
+| volume_efficiency | id      |
+| volume_efficiency | name    |
++-------------------+---------+
+
+```
+## Table: volume_performance
+
+
+Query: SHOW FIELD KEYS FROM volume_performance
+
+```raw
++--------------------+-------------------------+-----------+
+| iox::measurement   | fieldKey                | fieldType |
++--------------------+-------------------------+-----------+
+| volume_performance | actual_iops             | integer   |
+| volume_performance | async_delay             | integer   |
+| volume_performance | average_io_size         | integer   |
+| volume_performance | burst_io_credit         | integer   |
+| volume_performance | client_queue_depth      | integer   |
+| volume_performance | latency_usec            | integer   |
+| volume_performance | non_zero_blocks         | integer   |
+| volume_performance | normalized_iops         | integer   |
+| volume_performance | read_bytes              | integer   |
+| volume_performance | read_bytes_last_sample  | integer   |
+| volume_performance | read_latency_usec       | integer   |
+| volume_performance | read_ops_last_sample    | integer   |
+| volume_performance | throttle                | float     |
+| volume_performance | volume_size             | integer   |
+| volume_performance | volume_utilization      | float     |
+| volume_performance | write_bytes             | integer   |
+| volume_performance | write_bytes_last_sample | integer   |
+| volume_performance | write_latency_usec      | integer   |
+| volume_performance | write_ops_last_sample   | integer   |
+| volume_performance | zero_blocks             | integer   |
++--------------------+-------------------------+-----------+
+
+```
+
+Query: SHOW TAG KEYS FROM volume_performance
+
+```raw
++--------------------+---------+
+| iox::measurement   | tagKey  |
++--------------------+---------+
+| volume_performance | cluster |
+| volume_performance | id      |
+| volume_performance | name    |
++--------------------+---------+
+
+```
+## Table: volumes
+
+
+Query: SHOW FIELD KEYS FROM volumes
+
+```raw
++------------------+-------------------------------+-----------+
+| iox::measurement | fieldKey                      | fieldType |
++------------------+-------------------------------+-----------+
+| volumes          | block_size                    | integer   |
+| volumes          | fifo_size                     | integer   |
+| volumes          | min_fifo_size                 | integer   |
+| volumes          | qos_policy_id                 | integer   |
+| volumes          | remote_replication_mode       | integer   |
+| volumes          | remote_replication_snap_state | integer   |
+| volumes          | remote_replication_state      | integer   |
+| volumes          | total_size                    | integer   |
+| volumes          | va_docker_name                | string    |
+| volumes          | va_fstype                     | string    |
+| volumes          | va_provisioning               | string    |
+| volumes          | va_trident_backend_uuid       | string    |
+| volumes          | va_trident_platform           | string    |
+| volumes          | va_trident_platform_version   | string    |
+| volumes          | va_trident_plugin             | string    |
+| volumes          | va_trident_version            | string    |
++------------------+-------------------------------+-----------+
+
+```
+
+Query: SHOW TAG KEYS FROM volumes
+
+```raw
++------------------+--------------------+
+| iox::measurement | tagKey             |
++------------------+--------------------+
+| volumes          | access             |
+| volumes          | account_id         |
+| volumes          | cluster            |
+| volumes          | cluster_pair_id    |
+| volumes          | enable_512e        |
+| volumes          | id                 |
+| volumes          | name               |
+| volumes          | remote_volume_id   |
+| volumes          | remote_volume_name |
+| volumes          | scsi_naa_dev_id    |
+| volumes          | vol_cg_group_id    |
+| volumes          | volume_pair_uuid   |
++------------------+--------------------+
+
+```
+

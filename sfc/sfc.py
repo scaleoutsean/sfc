@@ -5,7 +5,7 @@
 ###############################################################################
 # Synopsis:                                                                   #
 # SFC v2 schedules and executes gathering of SolidFire API object properties  #
-#  and performance metrics, enriches obtained data and sends it to InfluxDB v1#
+#  and performance metrics, enriches obtained data and sends it to InfluxDB 3 #
 #                                                                             #
 # SFC v1 used to be part of NetApp HCI Collector.                             #
 #                                                                             #
@@ -16,13 +16,13 @@
 
 # =============== imports =====================================================
 
-
 import argparse
 import aiohttp
 import asyncio
 from aiohttp import ClientSession, ClientResponseError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import datetime
+import distro
 from getpass import getpass
 import logging
 import logging.handlers
@@ -36,42 +36,78 @@ import re
 import sys
 if not sys.warnoptions:
     import os
-    import warnings
+import warnings
 import time
+# import urllib.parse
+# import uuid
 warnings.simplefilter("default")
 os.environ["PYTHONWARNINGS"] = "default"
 
 # =============== default vars ================================================
 
+VERSION = '2.1.0'
+
 # Create reporting-only admin user with read-only access to the SolidFire API.
 # Modify these five variables to match your environment if you want hardcoded
 # values.
-
-INFLUX_HOST = '192.168.50.184'
-INFLUX_PORT = '32290'
+# INFLUX_HOST, INFLUX_PORT, INFLUX_DB, INFLUXDB3_AUTH_TOKEN, SF_MVIP, SF_USERNAME, SF_PASSWORD
+INFLUX_HOST = '192.168.1.146'
+INFLUX_PORT = '8181' # default port for InfluxDB 3; sfc.py accesses it over HTTPS 
 INFLUX_DB = 'sfc'
-SF_MVIP = '192.168.1.30'
-SF_USERNAME = 'monitor'
-# SF_PASSWORD = ''
+INFLUXDB3_AUTH_TOKEN = 'apiv3_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+SF_MVIP = '192.168.1.34'
+SF_USERNAME = 'monitoring'
+SF_PASSWORD = 'xxxxxxxxxx'
 
+# TLS certificates for SolidFire API:
+# https://docs.aiohttp.org/en/stable/client_advanced.html#example-use-self-signed-certificate
+# TLS certificates for InfluxDB 3:
+# https://docs.influxdata.com/influxdb3/core/release-notes/#updates-1
 
+# Below this line it's less likely we need to change anything.
 # Use startup sfc.py startup arguments (sfc.py -h) to modify main intervals
 INT_HI_FREQ = 60
 INT_MED_FREQ = 600
 INT_LO_FREQ = 3600
 INT_EXPERIMENTAL_FREQ = 600
 
-# Check the source code to see what this does
+# Check the source code below to see what this does (submits volume metrics in batches)
 CHUNK_SIZE = 24
 # =============== functions code ==============================================
 
 
-headers = {'Accept': 'application/json'}
-headers['Accept-Encoding'] = 'deflate, gzip;q=1.0, *;q=0.5'
-headers['Content-Type'] = 'application/json'
+# SolidFire headers (NO Authorization key!)
+sf_headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+# InfluxDB headers (Bearer token)
+influx_headers = {'Accept': 'application/json', 'Accept-Encoding': 'deflate, gzip;q=1.0, *;q=0.5', 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + INFLUXDB3_AUTH_TOKEN}
 
+async def sf_api_post(session, url, payload, auth):
+    """
+    Helper for SolidFire API POST requests with debug logging and required auth.
+    """
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
+        logging.debug(f"[SF DEBUG] POST {url}")
+        logging.debug(f"[SF DEBUG] Headers: {sf_headers}")
+        logging.debug(f"[SF DEBUG] Payload: {payload}")
+    async with session.post(url, data=payload, headers=sf_headers, auth=auth) as response:
+        if logging.getLogger().isEnabledFor(logging.DEBUG):
+            logging.debug(f"[SF DEBUG] Response status: {response.status}")
+            logging.debug(f"[SF DEBUG] Response headers: {response.headers}")
+        try:
+            response.raise_for_status()
+            return await response.json()
+        except aiohttp.ContentTypeError as e:
+            text = await response.text()
+            logging.error(f"[SF DEBUG] ContentTypeError: {e}")
+            logging.error(f"[SF DEBUG] Raw response text: {text}")
+            raise
+        except Exception as e:
+            text = await response.text()
+            logging.error(f"[SF DEBUG] Exception: {e}")
+            logging.error(f"[SF DEBUG] Raw response text: {text}")
+            raise
 
-async def volumes(session, **kwargs):
+async def volumes(session, auth, **kwargs):
     """
     Extracts useful volume properties including volume name.
 
@@ -79,6 +115,7 @@ async def volumes(session, **kwargs):
     """
     time_start = round(time.time(), 3)
     function_name = 'volumes'
+    volumes = None  # initialize volumes to None
     # NOTE: the volumeID pair is out of alphanumeric order because it maps to
     # 'id' which *is* in proper order. We have two sets of tags/fields depending if
     # the volume is paired
@@ -164,12 +201,10 @@ async def volumes(session, **kwargs):
             exit(200)
     api_payload = "{ \"method\": \"ListVolumes\", \"params\": {\"volumeStatus\": \"active\"} }"
     try:
-        async with session.post(SF_POST_URL, data=api_payload) as response:
-            r = await response.json()
-            result = r['result']['volumes']
+        r = await sf_api_post(session, SF_POST_URL, api_payload, auth)
+        result = r['result']['volumes']
     except Exception as e:
-        logging.error('Function ' + function_name +
-                      ': volume information not obtained - returning.')
+        logging.error('Function volumes: volume information not obtained - returning.')
         logging.error(e)
         return
     if not kwargs:
@@ -292,7 +327,7 @@ async def volumes(session, **kwargs):
     else:
         logging.error('Invalid argument passed to volumes() function.')
         return False
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     if args.loglevel == 'DEBUG':
         logging.debug("Volumes payload:\n " + str(volumes) + ".")
     logging.info('Volumes collected in ' + str(time_taken) + ' seconds.')
@@ -303,9 +338,10 @@ async def volumes(session, **kwargs):
 async def extract_volume_pair(volume_pairs: list) -> dict:
     """
     Extract information for first volume pairing from volume replication list and return a dict with contents.
-
     This is a helper function for the volumes() function.
-    Currently only the first paired volume is processed. Additional volumes and values may be added in the future.
+
+    Currently only the first paired volume (from possible several when paired one-to-many) is processed.
+    Additional volumes and values may be added in the future.
     """
     time_start = round(time.time(), 3)
     function_name = 'extract_volume_pair'
@@ -314,8 +350,7 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
         if args.loglevel == 'DEBUG':
             logging.debug('volume_pairs list ' + str(volume_pairs) + '.')
         logging.warning(
-            'Volume pairs list is empty or has more than one pair, which is currently not implemented. Returning.')
-        return {}
+            'Volume pairs list is empty or one-to-many detected (not implemented). Returning.')
     else:
         vp_dict = volume_pairs[0]
         for k in vp_dict:
@@ -405,7 +440,7 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
             logging.warning(
                 'KeyError while parsing remoteReplication dictionary: ' + str(e))
             return {}
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     if args.loglevel == 'DEBUG':
         logging.debug('Volume pair payload: ' + str(vp) + '.')
     logging.info(
@@ -413,7 +448,11 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
         str(time_taken) +
         ' seconds.')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
-    return vp
+    if vp != {}:
+        return vp
+    else:
+        logging.warning('Volume pair data not extracted. Returning empty dict.')
+        return {}
 
 
 async def extract_trident_volume_attributes(vol_attr: dict) -> str:
@@ -458,14 +497,11 @@ async def extract_trident_volume_attributes(vol_attr: dict) -> str:
             '. Skipping.')
         return ''
     if args.loglevel == 'DEBUG':
-        logging.debug(
-            'Volume attributes extracted:\n' +
-            str(v_attrs_dict) +
-            '.')
+        logging.debug('Volume attributes extracted: ' + str(v_attrs_dict) + '.')
     return (','.join([f'{k}="{v}"' for k, v in v_attrs_dict.items()]))
 
 
-async def sync_jobs(session):
+async def sync_jobs(session, auth):
     """
     Obtains information about synchronization jobs using ListSyncJobs and sends to InfluxDB.
 
@@ -475,7 +511,7 @@ async def sync_jobs(session):
     time_start = round(time.time(), 3)
     function_name = 'sync_jobs'
     api_payload = "{ \"method\": \"ListSyncJobs\" }"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
     result = r['result']['syncJobs']
     if args.loglevel == 'DEBUG':
@@ -546,7 +582,7 @@ async def sync_jobs(session):
                         ' is not yet supported. You may submit this record to have it considered for inclusion in SFC. Skipping.')
                 logging.info('Skipped sync job: ' + str(i))
     await send_to_influx(sync_jobs)
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     if args.loglevel == 'DEBUG':
         logging.debug('Sync jobs payload:\n ' + str(sync_jobs) + '.')
     logging.info(
@@ -557,7 +593,7 @@ async def sync_jobs(session):
     return
 
 
-async def volume_performance(session, **kwargs):
+async def volume_performance(session, auth, **kwargs):
     """
     Extract volume stats for additional processing and sends to InfluxDB.
 
@@ -566,7 +602,7 @@ async def volume_performance(session, **kwargs):
     time_start = round(time.time(), 3)
     function_name = 'volume_performance'
     try:
-        all_volumes = await volumes(session, names=True)
+        all_volumes = await volumes(session, auth, names=True)
         isinstance(all_volumes, list)
         if args.loglevel == 'DEBUG':
             logging.debug('Volume information obtained and is a list of ' +
@@ -617,7 +653,7 @@ async def volume_performance(session, **kwargs):
             logging.info("Volume batch IDs:\n" + str(volume_batch_ids) + ".")
         api_payload = "{ \"method\": \"ListVolumeStats\", \"params\": { \"volumeIDs\": " + \
             str(volume_batch_ids) + "}}"
-        async with session.post(SF_POST_URL, data=api_payload) as response:
+        async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
             r = await response.json()
         result = r['result']['volumeStats']
         # NOTE: we need to convert the asyncDelay from null to integer or parse the string to seconds:int
@@ -684,7 +720,7 @@ async def volume_performance(session, **kwargs):
         b = b + 1
         volumes_performance = volumes_performance + volume_performance
     await send_to_influx(volumes_performance)
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     if args.loglevel == 'DEBUG':
         logging.debug(
             "Volume performance payload:\n" +
@@ -695,7 +731,7 @@ async def volume_performance(session, **kwargs):
     return
 
 
-async def accounts(session):
+async def accounts(session, auth):
     """
     Call SolidFire GetClusterAccounts, extract data from response and send to InfluxDB.
     """
@@ -703,7 +739,7 @@ async def accounts(session):
     function_name = 'accounts'
     accounts = ''
     api_payload = "{ \"method\": \"ListAccounts\" }"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
     for account in r['result']['accounts']:
         if (account['enableChap'] == True):
@@ -727,7 +763,7 @@ async def accounts(session):
         accounts = accounts + "accounts,cluster=" + CLUSTER_NAME + ",id=" + str(account['accountID']) + ",name=" + str(
             account['username']) + " " + "active=" + account_active + "i" + ",volume_count=" + volume_count + "i" + "\n"
     await send_to_influx(accounts)
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     if args.loglevel == 'DEBUG':
         logging.debug("Account (tenants) list payload: " + str(accounts))
     logging.info('Tenant accounts gathered in ' +
@@ -736,7 +772,7 @@ async def accounts(session):
     return accounts
 
 
-async def account_efficiency(session):
+async def account_efficiency(session, auth):
     """
     Process account efficiency response from ListAccounts, GetAccountEfficiency and submit to InfluxDB.
     """
@@ -744,8 +780,17 @@ async def account_efficiency(session):
     time_start = round(time.time(), 3)
     account_efficiency = '#account_efficiency\n'
     api_payload = "{ \"method\": \"ListAccounts\", \"params\": {}}"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
-        r = await response.json()
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+        if response.status != 200:
+            text = await response.text()
+            logging.error(f"Failed to get accounts. Status: {response.status}, Response: {text}")
+            return
+        try:
+            r = await response.json()
+        except Exception as e:
+            text = await response.text()
+            logging.error(f"Failed to parse JSON. Response text: {text}")
+            return
         account_id_name_list = []
         try:
             for account in r['result']['accounts']:
@@ -761,7 +806,7 @@ async def account_efficiency(session):
     for account in account_id_name_list:
         api_payload = "{ \"method\": \"GetAccountEfficiency\", \"params\": { \"accountID\": " + \
             str(account[0]) + " }}"
-        async with session.post(SF_POST_URL, data=api_payload) as response:
+        async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
             r = await response.json()
         compression = round(r['result']['compression'], 2)
         deduplication = round(r['result']['deduplication'], 2)
@@ -770,7 +815,7 @@ async def account_efficiency(session):
         account_id_efficiency = "account_efficiency,cluster=" + CLUSTER_NAME + ",id=" + str(account[0]) + ",name=" + str(account[1]) + " " + "compression=" + str(
             compression) + ",deduplication=" + str(deduplication) + ",storage_efficiency=" + str(storage_efficiency) + ",thin_provisioning=" + str(thin_provisioning) + "\n"
         account_efficiency = account_efficiency + account_id_efficiency
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     logging.info('Account efficiency collected in ' +
                  str(time_taken) + ' seconds.')
     if args.loglevel == 'DEBUG':
@@ -782,7 +827,7 @@ async def account_efficiency(session):
     return
 
 
-async def volume_efficiency(session):
+async def volume_efficiency(session, auth):
     """
     Use ListVolumes, GetVolumeEfficiency to gather volume efficiency and submit to InfluxDB.
     """
@@ -790,7 +835,7 @@ async def volume_efficiency(session):
     volume_efficiency = "#volume_efficiency\n"
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"ListVolumes\", \"params\": {}}"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
         volume_id_name_list = []
         for volume in r['result']['volumes']:
@@ -800,7 +845,7 @@ async def volume_efficiency(session):
         for volume in short_list:
             api_payload = "{ \"method\": \"GetVolumeEfficiency\", \"params\": { \"volumeID\": " + \
                 str(volume[0]) + " }}"
-            async with session.post(SF_POST_URL, data=api_payload) as response:
+            async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
                 r = await response.json()
                 compression = round(r['result']['compression'], 2)
                 deduplication = round(r['result']['deduplication'], 2)
@@ -812,7 +857,7 @@ async def volume_efficiency(session):
                 volume_efficiency = volume_efficiency + volume_id_efficiency
                 await send_to_influx(volume_efficiency)
 
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     if args.loglevel == 'DEBUG':
         logging.debug("Volume efficiency payload: " + str(volume_efficiency))
     logging.info('Volume efficiency collected in ' +
@@ -821,14 +866,14 @@ async def volume_efficiency(session):
     return
 
 
-async def cluster_faults(session):
+async def cluster_faults(session, auth):
     """
     Use GetClusterFaults to extract cluster faults and return for sending to InfluxDB.
     """
     time_start = round(time.time(), 3)
     function_name = 'cluster_faults'
     api_payload = "{ \"method\": \"ListClusterFaults\" }"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
     group = {'bestPractices': 0, 'error': 0, 'critical': 0, 'warning': 0}
     for fault in r['result']['faults']:
@@ -842,7 +887,7 @@ async def cluster_faults(session):
     else:
         cluster_faults = "cluster_faults,cluster=" + CLUSTER_NAME + \
             ",total=0 critical=0i,error=0i,warning=0i,bestPractices=0i" + "\n"
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     await send_to_influx(cluster_faults)
     logging.info('Cluster faults gathered in ' + str(time_taken) + ' seconds.')
     if args.loglevel == 'DEBUG':
@@ -851,12 +896,12 @@ async def cluster_faults(session):
     return cluster_faults
 
 
-async def volume_qos_histograms(session):
+async def volume_qos_histograms(session, auth):
     """
     Get ListVolumeQoSHistograms results, extract, transform and send to InfluxDB.
     """
     # NOTE: https://docs.influxdata.com/influxdb/v1/query_language/functions/#histogram
-    # NOTE: Delay to avoid executing concurrently with other functions
+    # NOTE: It is resource-intensive so delay it a bit to avoid executing concurrently with other functions
     sleep_delay = random.randint(5, 10)
     await asyncio.sleep(sleep_delay)
     time_start = round(time.time(), 3)
@@ -864,8 +909,9 @@ async def volume_qos_histograms(session):
     if args.experimental == False:
         logging.warning('QoS histograms are not enabled. Returning...')
         return
+    volumes_dict = None
     try:
-        volumes_dict = await volumes(session, names_dict=True)
+        volumes_dict = await volumes(session, auth, names_dict=True)
         isinstance(volumes, dict)
         if args.loglevel == 'DEBUG':
             logging.debug('ID-volume KV pairs obtained from volumes: ' +
@@ -876,7 +922,7 @@ async def volume_qos_histograms(session):
         logging.error(e)
         return
     api_payload = "{ \"method\": \"ListVolumeQoSHistograms\" }"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
         result = r['result']['qosHistograms']
     qosh_list = await _split_list(result)
@@ -884,7 +930,7 @@ async def volume_qos_histograms(session):
         for hg in qosh_batch:
             vol_id_name = (hg['volumeID'], volumes_dict[hg['volumeID']])
             await qos_histogram_processor(hg, vin=vol_id_name)
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     logging.info('Volume QoS histograms collected in ' +
                  str(time_taken) + ' seconds.')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
@@ -894,7 +940,7 @@ async def volume_qos_histograms(session):
 
 async def qos_histogram_processor(hg, **kwargs):
     """
-    Processes QoS histogram output from volume_qos_histograms function and sends to InfluxDB.
+    Process QoS histogram output from volume_qos_histograms function and send to InfluxDB.
     """
     # histogram_types = ['belowMinIopsPercentages', 'minToMaxIopsPercentages', 'readBlockSizes', 'targetUtilizationPercentages', 'throttlePercentages', 'writeBlockSizes']
     histogram_types = [('belowMinIopsPercentages', 'below_min_iops_percentages'),
@@ -954,6 +1000,7 @@ async def qos_histogram_processor(hg, **kwargs):
     vol_id_name = kwargs['vin']
     n = 0
     volume_payload = ''
+    volume_kvs_string = ''
     for bucket_tuple, histogram_type in zip(hg_names, hg['histograms']):
         volume_kvs_string = "histogram_" + \
             histogram_types[n][1] + ",cluster=" + \
@@ -969,8 +1016,6 @@ async def qos_histogram_processor(hg, **kwargs):
         if args.loglevel == 'DEBUG':
             logging.debug(
                 "QoS histogram records (n=" + str(n) + ") for volume " + str(vol_id_name[0]) + ":\n" + str(volume_kvs_string))
-        # await send_to_influx(volume_kvs_string)
-        # logging.info("Sent QoS histogram record (n=" + str(n) + ") for volume " + str(vol_id_name[0]) + ". Data:\n" + str(volume_kvs_string))
         volume_payload = volume_payload + volume_kvs_string + "\n"
         n = n + 1
     await send_to_influx(volume_payload)
@@ -979,14 +1024,14 @@ async def qos_histogram_processor(hg, **kwargs):
     return
 
 
-async def node_performance(session):
+async def node_performance(session, auth):
     """
     Use GetClusterStats to extract node stats and return for sending to InfluxDB.
     """
     time_start = round(time.time(), 3)
     function_name = 'node_performance'
     api_payload = "{ \"method\": \"ListNodeStats\" }"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
     result = r['result']['nodeStats']['nodes']
     metrics = [("cpu", "cpu"), ("networkUtilizationCluster", "network_utilization_cluster"),
@@ -1002,7 +1047,7 @@ async def node_performance(session):
             if isinstance(val, int):
                 str_val = str(val) + "i"
             else:
-                pass
+                str_val = str(val)
             metric_detail = key_string + "=" + str_val + ","
         record = len(metrics)
         n = 0
@@ -1023,7 +1068,7 @@ async def node_performance(session):
             ("node_performance,cluster=" + CLUSTER_NAME + ",id=" +
              str(node['nodeID']) + " " + metric_details + "\n")
     await send_to_influx(node_performance)
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     if args.loglevel == 'DEBUG':
         logging.debug("Node stats: " + str(node_performance))
     logging.info('Node stats collected in ' + str(time_taken) + ' seconds.')
@@ -1031,14 +1076,16 @@ async def node_performance(session):
     return
 
 
-async def iscsi_sessions(session):
+async def iscsi_sessions(session, auth):
     """
-    Uses GetIscsiSessions to extract iSCSI sessions and return for sending to InfluxDB.
+    Use GetIscsiSessions to extract iSCSI sessions info and send to InfluxDB.
+    When there are no iSCSI sessions, sends an empty payload to InfluxDB and iscsi_sessions table
+      does not get created.
     """
     function_name = 'iscsi_sessions'
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"ListISCSISessions\" }"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
     result = r['result']['sessions']
     fields = [
@@ -1107,12 +1154,13 @@ async def iscsi_sessions(session):
             for key in metrics:
                 key_string = key[1]
                 val = session[key[0]]
+                str_val = None  # Ensure str_val is always defined
                 if isinstance(val, str):
                     str_val = val
                 elif isinstance(val, int):
                     str_val = str(val) + "i"
                 else:
-                    pass
+                    str_val = "None"
                 if m < (record - 1):
                     if str_val is not None:
                         metric_detail = key_string + "=" + str_val + ","
@@ -1126,27 +1174,26 @@ async def iscsi_sessions(session):
                  field_details + " " + metric_details + "\n")
         if args.loglevel == 'DEBUG':
             logging.debug("iSCSI sessions payload: " + str(iscsi_sessions))
-        time_taken = (round(time.time(), 3) - time_start)
+        time_taken = max(0.0, round(time.time() - time_start, 3))
         logging.info('iSCSI sessions collected. Sending to InfluxDB information about ' + str(iscsi_session_number) +
                      ' sessions from one or more clients. Time taken: ' + str(time_taken) + ' seconds.')
         await send_to_influx(iscsi_sessions)
     else:
         logging.info(
-            'iSCSI sessions collected, but it appears there are no iSCSI connections. Sending empty payload to InfluxDB.')
-        await send_to_influx("# iscsiSessions,cluster=" + CLUSTER_NAME + "\n")
-        time_taken = (round(time.time(), 3) - time_start)
+            'iSCSI sessions collected. It appears there are no iSCSI connections. No payload to send to InfluxDB.')
+        time_taken = max(0.0, round(time.time() - time_start, 3))
         await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     return
 
 
-async def cluster_performance(session):
+async def cluster_performance(session, auth):
     """
-    Use GetClusterStats to extract cluster stats and return for sending to InfluxDB.
+    Use GetClusterStats to extract cluster stats and send to InfluxDB.
     """
     function_name = 'cluster_performance'
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"GetClusterStats\" }"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
     result = r['result']['clusterStats']
     metrics = [("actualIOPS", "actual_iops"),
@@ -1182,7 +1229,7 @@ async def cluster_performance(session):
         metric_details = metric_details + metric_detail
     cluster_performance = ("cluster_performance,name=" +
                            CLUSTER_NAME + " " + metric_details + "\n")
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     logging.info('Cluster performance collected in ' +
                  str(time_taken) + ' seconds.')
     if args.loglevel == 'DEBUG':
@@ -1193,14 +1240,15 @@ async def cluster_performance(session):
     return
 
 
-async def cluster_capacity(session):
+async def cluster_capacity(session, auth):
     """
-    Get GetClusterCapacity results, send subset of response to InfluxDB.
+    Get GetClusterCapacity results, send a subset to InfluxDB.
+    Creates several derived metrics that are not part of the API response.
     """
     function_name = 'cluster_capacity'
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"GetClusterCapacity\" }"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
         result = r['result']['clusterCapacity']
         cluster_capacity = ""
@@ -1253,7 +1301,7 @@ async def cluster_capacity(session):
             result['dedupeFactor'] = 1
         if result['uniqueBlocksUsedSpace'] != 0:
             # NOTE: 0.93x because GC reserve capacity (7%) is normally empty so
-            # not compressed
+            # not actually compressed
             result['compressionFactor'] = round(
                 (result['uniqueBlocks'] * 4096.0) / (result['uniqueBlocksUsedSpace'] * .93), 2)
         else:
@@ -1285,21 +1333,21 @@ async def cluster_capacity(session):
         logging.info(
             'Cluster capacity names collected. Sending to InfluxDB next.')
         await send_to_influx(cluster_capacity)
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     logging.info('Cluster capacity collected in ' +
                  str(time_taken) + ' seconds.')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     return
 
 
-async def cluster_version(session):
+async def cluster_version(session, auth):
     """
-    Use GetClusterVersionInfo to get cluster version details.
+    Use GetClusterVersionInfo to get cluster version details and send to InfluxDB.
     """
     function_name = 'cluster_version'
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"GetClusterVersionInfo\" }"
-    async with session.post(SF_URL + SF_JSON_PATH, data=api_payload) as response:
+    async with session.post(SF_URL + SF_JSON_PATH, data=api_payload, auth=auth) as response:
         r = await response.json(content_type=None)
         result = r['result']
         api_version = str(result['clusterAPIVersion'])
@@ -1307,7 +1355,7 @@ async def cluster_version(session):
         payload = ("cluster_version,name=" + CLUSTER_NAME + ",version=" +
                    str(version) + " " + "api_version=" + str(api_version) + "\n")
     await send_to_influx(payload)
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     if args.loglevel == 'DEBUG':
         logging.debug("Cluster version payload: " + str(payload))
         logging.debug('Cluster version info collected in ' +
@@ -1316,14 +1364,14 @@ async def cluster_version(session):
     return
 
 
-async def drive_stats(session):
+async def drive_stats(session, auth):
     """
     Use ListDriveStats and send selected parts of response to InfluxDB.
     """
     function_name = 'drive_stats'
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"ListDriveStats\" }"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
         result = r['result']['driveStats']
         payload = "# DriveStats\n"
@@ -1347,6 +1395,8 @@ async def drive_stats(session):
                 val = drive[key]
                 if isinstance(val, int):
                     str_val = str(val) + "i"
+                else:
+                    str_val = str(val)
                 if n < (record - 1):
                     metric_detail = key + "=" + str_val + ","
                 else:
@@ -1358,7 +1408,7 @@ async def drive_stats(session):
         if args.loglevel == 'DEBUG':
             logging.debug("Drive stats: " + str(payload))
         await send_to_influx(payload)
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     if args.loglevel == 'DEBUG':
         logging.debug(
             'Drive stats collected in ' +
@@ -1368,18 +1418,18 @@ async def drive_stats(session):
     return
 
 
-async def schedules(session):
+async def schedules(session, auth):
     """
     Use ListSchedules to get snapshot schedules and sends a subset of each to InfluxDB.
 
-    There are different types of schedules. schedules() parses only snapshot type schedule.
+    There are different types of schedules. schedules() parses only 'snapshot' type of schedule. If there's none, the measurement will be empty.
     """
     function_name = 'schedules'
     sleep_delay = random.randint(5, 10)
     await asyncio.sleep(sleep_delay)
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"ListSchedules\" }"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
         if args.loglevel == 'DEBUG':
             logging.debug("Schedules response:\n" + str(r))
@@ -1474,6 +1524,7 @@ async def schedules(session):
                 tags = tags + tag_key + "=" + str(tag_val) + ""
             fields = ' '
             for field in schedule_fields:
+                field_val = None  # Ensure field_val is always initialized
                 if field[0] in schedule:
                     field_val = schedule[field[0]]
                     if isinstance(field_val, str):
@@ -1507,26 +1558,33 @@ async def schedules(session):
         else:
             logging.info("Unsupported schedule type observed.")
 
-    time_taken = (round(time.time(), 3) - time_start)
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     if args.loglevel == 'DEBUG':
         logging.debug("Schedules:\n" + str(payload))
         logging.debug('Schedules collected in ' +
                       str(time_taken) + ' seconds.')
-    await send_to_influx(payload)
+    # If there are no schedules, payload will be empty and no data will be sent to InfluxDB
+    if payload != '':
+        await send_to_influx(payload)
+    else:
+        logging.info(
+            'Schedules collected. It appears there are no snapshot schedules. No payload to send to InfluxDB.')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     return
 
 
-async def snapshot_groups(session):
+async def snapshot_groups(session, auth):
     """
-    Uses ListGroupSnapshots to get information about group snapshots and send a subset of each to InfluxDB.
+    Use ListGroupSnapshots to get information about group snapshots and send a subset of each to InfluxDB.
+    
+    If there are no group snapshots, the payload will be empty and no data will be sent to InfluxDB.
     """
     function_name = 'snapshot_groups'
     sleep_delay = random.randint(5, 10)
     await asyncio.sleep(sleep_delay)
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"ListGroupSnapshots\" }"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
+    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
         if args.loglevel == 'DEBUG':
             logging.debug("Group snapshots response:\n" + str(r))
@@ -1556,6 +1614,7 @@ async def snapshot_groups(session):
     payload_header = "snapshot_groups,cluster=" + CLUSTER_NAME + ","
     for snapshot in result:
         # NOTE: process time values to save disk space
+        snap_epoch_sec = (0, 0)  # Ensure snap_epoch_sec is always defined
         try:
             if isinstance(snapshot['members'],
                           list) and snapshot['members'] != []:
@@ -1645,6 +1704,7 @@ async def snapshot_groups(session):
                 tags = tags + tag_key + "=" + str(tag_val) + ","
         fields = ' '
         for field in snap_fields:
+            field_val = 0
             if field[0] in snapshot:  # if scheduleInfo does not exist, use the schedule object
                 if snapshot[field[0]] is None:
                     field_val = 0
@@ -1653,18 +1713,13 @@ async def snapshot_groups(session):
                 else:
                     field_val = snapshot[field[0]]
             elif 'remoteStatuses' in snapshot:
-                if snapshot['remoteStatuses'] != [
-                ] and snapshot['remoteStatuses'][0] is not None:
+                if snapshot['remoteStatuses'] != [] and snapshot['remoteStatuses'][0] is not None:
                     try:
                         if field[0] in snapshot['remoteStatuses'][0].keys():
                             field_val = snapshot['remoteStatuses'][0][field[0]]
                     except BaseException:
                         field_val = "0"
-            else:
-                if args.loglevel == 'DEBUG':
-                    logging.debug(
-                        "  - Field does NOT exist in schedule or scheduleInfo: " + str(field[0]))
-                field_val = "0"
+            # else: field_val remains as initialized above
             field_key = field[1]
             if isinstance(field_val, str):
                 field_val = "\"" + str(field_val) + "\""
@@ -1676,179 +1731,131 @@ async def snapshot_groups(session):
                 fields = fields + field_key + "=" + field_val + ","
         snapshot_payload = payload_header + tags + fields + "\n"
         payload = payload + snapshot_payload
-    time_taken = (round(time.time(), 3) - time_start)
+
+    time_taken = max(0.0, round(time.time() - time_start, 3))
+    logging.info('Snapshots collected in ' + str(time_taken) + ' seconds.')
     if args.loglevel == 'DEBUG':
-        logging.debug("Snapshot groups:\n" + str(payload))
-        logging.debug('Snapshot groups collected in ' +
-                      str(time_taken) + ' seconds.')
-    await send_to_influx(payload)
+        logging.debug("Snapshots:\n" + str(payload))
+    if payload != '':
+        await send_to_influx(payload)
+    else:
+        logging.info(
+            'Snapshots collected. It appears there are no group snapshots. No payload to send to InfluxDB.')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     return
 
 
-async def snapshots(session):
+async def list_database():
     """
-    Uses ListSnapshots to get list of snapshots and sends a subset of each to InfluxDB.
+    Call InfluxDB /api/v3/configure/database and return the list of existing databases.
     """
-    function_name = 'snapshots'
-    sleep_delay = random.randint(5, 10)
-    await asyncio.sleep(sleep_delay)
-    time_start = round(time.time(), 3)
-    api_payload = "{ \"method\": \"ListSnapshots\" }"
-    async with session.post(SF_POST_URL, data=api_payload) as response:
-        r = await response.json()
-    result = r['result']['snapshots']
-    snap_tags = [
-        ('createTime',
-         'create_time'),
-        ('enableRemoteReplication',
-         'enable_remote_replication'),
-        ('expirationTime',
-         'expiration_delta'),
-        ('name',
-         'new_snapshot_name'),
-        ('remoteStatus',
-         'remote_status'),
-        ('snapshotID',
-         'snapshot_id'),
-        ('status',
-         'status'),
-        ('volumeName',
-         'volume_name'),
-        ('volumePairUUID',
-         'volume_pair_uuid')]
-    snap_fields = [('groupID', 'group_id'), ('volumeID', 'volume_id')]
-    snap_pop = [
-        'attributes',
-        'checksum',
-        'expirationReason',
-        'instanceCreateTime',
-        'instanceSnapshotUUID',
-        'snapMirrorLabel',
-        'snapshotUUID',
-        'virtualVolumeID']
-    result = sorted(result, key=lambda k: k['snapshotID'])
-    payload = ''
-    payload_header = "snapshots,cluster=" + CLUSTER_NAME + ","
-    for snapshot in result:
-        try:
-            if snapshot['expirationTime'] is None or snapshot['expirationTime'] == 'null' or snapshot['expirationTime'] == 'fifo':
-                # NOTE: time_diff_epoch takes strings as input and '0' means no
-                # expiration
-                snapshot['expirationTime'] = '0'
-            snap_epoch_sec = await time_diff_epoch(snapshot['createTime'], snapshot['expirationTime'])
-            if isinstance(snap_epoch_sec[0], int) and isinstance(
-                    snap_epoch_sec[1], int):
-                snapshot['createTime'] = snap_epoch_sec[0]
-                snapshot['expirationTime'] = snap_epoch_sec[1]
+    url = f'https://{INFLUX_HOST}:{INFLUX_PORT}/api/v3/configure/database?format=json'
+    headers = {
+        'Authorization': f'Bearer {INFLUXDB3_AUTH_TOKEN}',
+        'Content-Type': 'application/json'
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as r:
+            if r.status == 200:
+                data = await r.json()
+                if logging.getLogger().isEnabledFor(logging.DEBUG):
+                    logging.debug(f"List of databases: {data}")
+                dbs = [list(db.values())[0] for db in data]
+                return (dbs)    
             else:
-                snapshot['createTime'] = 0
-                snapshot['expirationTime'] = 0
-        except Exception as e:
-            logging.error("Error in time_diff_epoch function: " + str(e))
-            snapshot['createTime'] = 0
-            snapshot['expirationTime'] = 0
-        for s in snap_pop:
-            if s in snapshot:
-                snapshot.pop(s)
-        if snapshot['enableRemoteReplication'] == False:
-            snapshot['enableRemoteReplication'] = 0
-        else:
-            snapshot['enableRemoteReplication'] = 1
-        if snapshot['status'] == 'done':
-            snapshot['status'] = 1
-        else:
-            # NOTE: Else map to 0, although there may be "Syncing" and more
-            snapshot['status'] = 0
-        if 'remoteStatuses' in snapshot:
-            if snapshot['remoteStatuses'] != [
-            ] and snapshot['remoteStatuses'][0] is not None:
-                if snapshot['remoteStatuses'][0]['remoteStatus'] == 'Present':
-                    snapshot['remoteStatus'] = 1
-                else:
-                    # NOTE: Else 0, although there may be intermediate states
-                    snapshot['remoteStatus'] = 0
-        tags = ''
-        for tag in snap_tags:
-            tag_key = tag[1]
-            if tag[0] in snapshot:  # if scheduleInfo does not exist, use the schedule object
-                if snapshot[tag[0]] is None:
-                    tag_val = 0
-                else:
-                    tag_val = snapshot[tag[0]]
-            elif 'remoteStatuses' in snapshot:
-                if snapshot['remoteStatuses'] != [
-                ] and snapshot['remoteStatuses'][0] is not None:
-                    try:
-                        if tag[0] in snapshot['remoteStatuses'][0].keys():
-                            tag_val = snapshot['remoteStatuses'][0][tag[0]]
-                    except BaseException:
-                        if args.loglevel == 'DEBUG':
-                            logging.debug(
-                                "Tag does NOT exist in snapshot or snapshot-remoteStatuses: ",
-                                snapshot['remoteStatuses'][0].keys())
-                        tag_val = "0"
-            else:
-                if args.loglevel == 'DEBUG':
-                    logging.debug(
-                        "Tag does NOT exist in schedule or scheduleInfo: " + str(tag[0]))
-                tag_val = "0"
-            if tag_key in snap_tags[-1]:
-                tags = tags + tag_key + "=" + str(tag_val) + ""
-            else:
-                tags = tags + tag_key + "=" + str(tag_val) + ","
-        fields = ' '
-        for field in snap_fields:
-            if args.loglevel == 'DEBUG':
-                logging.debug("Processing field: " + str(field))
-            if field[0] in snapshot:  # if scheduleInfo does not exist, use the schedule object
-                if snapshot[field[0]] is None:
-                    field_val = 0
-                else:
-                    field_val = snapshot[field[0]]
-            elif 'remoteStatuses' in snapshot:
-                if snapshot['remoteStatuses'] != [
-                ] and snapshot['remoteStatuses'][0] is not None:
-                    try:
-                        if field[0] in snapshot['remoteStatuses'][0].keys():
-                            field_val = snapshot['remoteStatuses'][0][field[0]]
-                    except BaseException:
-                        field_val = "0"
-            else:
-                field_val = "0"
-            field_key = field[1]
-            if isinstance(field_val, str):
-                field_val = "\"" + str(field_val) + "\""
-            elif isinstance(field_val, int):
-                field_val = str(field_val) + "i"
-            if field == snap_fields[-1]:
-                fields = fields + field_key + "=" + field_val + ""
-            else:
-                fields = fields + field_key + "=" + field_val + ","
-        snapshot_payload = payload_header + tags + fields + "\n"
-        payload = payload + snapshot_payload
+                text = await r.text()
+                logging.error(f"Failed to list databases. Status: {r.status}, Response: {text}")
+                return []
 
-    time_taken = (round(time.time(), 3) - time_start)
-    logging.info('Snapshots collected in ' + str(time_taken) + ' seconds.')
-    if args.loglevel == 'DEBUG':
-        logging.debug("Snapshots:\n" + str(payload))
-    await send_to_influx(payload)
-    await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
+
+async def create_database_v3(INFLUX_DB):
+    """
+    Create InfluxDB 3 database using the /api/v3/configure/database endpoint and verify creation.
+    """
+    url = f'https://{INFLUX_HOST}:{INFLUX_PORT}/api/v3/configure/database'
+    headers = {
+        'Authorization': f'Bearer {INFLUXDB3_AUTH_TOKEN}',
+        'Content-Type': 'application/json'
+    }
+    payload = {"db": INFLUX_DB}
+    dbs = await list_database()    
+    if INFLUX_DB in dbs:
+        logging.info(f"Database '{INFLUX_DB}' exists in InfluxDB. Skipping creation of new database.")
+        return
+    else:
+        logging.error(f"Database '{INFLUX_DB}' not found after creation attempt.")
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=payload) as r:
+            if r.status == 200:
+                if logging.getLogger().isEnabledFor(logging.DEBUG):
+                    logging.debug(msg=f"Database '{INFLUX_DB}' created or already exists (HTTP 200). Checking existence...")
+                return
+            else:
+                text = await r.text()
+                logging.error(f"Failed to create database '{INFLUX_DB}'. Status: {r.status}, Response: {text}")
+                if logging.getLogger().isEnabledFor(logging.DEBUG):
+                    logging.debug(f"Database creation error: {text}")
     return
 
 
 async def send_to_influx(payload):
     """
-    Send received payload to InfluxDB.
+    Send received payload to InfluxDB 3 over HTTPS.
     """
-    measurement = payload.split(",")[0]
+    original_lines = payload.splitlines()
+    payload_lines = len(original_lines)
     if args.loglevel == 'DEBUG':
-        logging.debug('send_to_influx() received data for ' +
-                      measurement + ': ' + str(payload.count('\n')) + ' lines.')
+        logging.debug('send_to_influx() received payload data with ' + str(payload_lines) + ' lines.')
+    # If "measurement" is '' or null, we cannot send data to InfluxDB, so error out, print payload, and return False
+    # Extract measurement name from the first line
+    first_line = payload.splitlines()[0] if payload else ''
+    measurement = first_line.split(",", 1)[0] if first_line else ''
+    if measurement is None or measurement == '':
+        logging.error('Measurement is empty or null. Cannot send data to InfluxDB.')
+        logging.error('Payload:\n' + str(payload))
+        return False    
+    # If payload is 0 lines, we cannot send data to InfluxDB, so error out, print payload, and return False
+    if payload is None or payload == '' or payload.count('\n') == 0:
+        logging.error('Payload is empty or has no lines. Cannot send data to InfluxDB.')
+        logging.error('Payload:\n' + str(payload))
+        return False
+    # Strip trailing space from any misformatted lines, if any
+    stripped_lines = [line.rstrip() for line in original_lines]
+    payload_stripped = '\n'.join(stripped_lines)
+    # Ensure no lines were removed - compare line count before and after stripping
+    if len(original_lines) != len(stripped_lines):
+        logging.error('We have fewer lines after stripping trailing spaces. This may indicate mishandling.')
+        logging.error('Original payload had ' + str(len(original_lines)) + ' lines.')
+        logging.error('Stripped payload has ' + str(len(stripped_lines)) + ' lines.')
+        logging.error('Payload with stripped lines:\n' + payload_stripped)
+        return False
+    # Optionally, diff the payloads and log if there are changes
+    if args.loglevel == 'DEBUG' and payload != payload_stripped:
+        import difflib
+        diff = list(difflib.unified_diff(
+            payload.splitlines(),
+            payload_stripped.splitlines(),
+            fromfile='original',
+            tofile='stripped',
+            lineterm=''
+        ))
+        if diff:
+            logging.debug('Diff between original and stripped payload:\n' + '\n'.join(diff))
+        else:
+            logging.debug('No differences found between original and stripped payload.')
+    payload = payload_stripped
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(enable_cleanup_closed=True)) as session:
-        urlPostEndpoint = 'http://' + INFLUX_HOST + ':' + \
-            INFLUX_PORT + '/write?db=' + INFLUX_DB + "&precision=s"
-        headers = {'Content-Type': 'application/octet-stream'}
+        if INFLUXDB3_AUTH_TOKEN is None or INFLUXDB3_AUTH_TOKEN == '':
+            logging.error('INFLUXDB3_AUTH_TOKEN is not set. Cannot send data to InfluxDB.')
+            return False
+        if INFLUX_DB is None or INFLUX_DB == '':
+            logging.error('INFLUX_DB is not set. Cannot send data to InfluxDB.')
+            return False
+        urlPostEndpoint = f"https://{INFLUX_HOST}:{INFLUX_PORT}/api/v3/write_lp?db={INFLUX_DB}&precision=second"
+        headers = {
+            "Authorization": f"Bearer {INFLUXDB3_AUTH_TOKEN}",
+            "Content-Type": "text/plain; charset=utf-8"
+        }
         async with session.post(url=urlPostEndpoint, data=payload, headers=headers) as db_session:
             resp = db_session.status
         await session.close()
@@ -1857,7 +1864,8 @@ async def send_to_influx(payload):
                       measurement + ', response code: ' + str(resp))
         logging.error('Payload:\n' + str(payload))
         return False
-    else:
+    else:        
+        # Do not log successful sends unless in DEBUG mode
         if args.loglevel == 'DEBUG':
             logging.debug('send_to_influx() for ' +
                           measurement + ': response code: 204')
@@ -1866,7 +1874,7 @@ async def send_to_influx(payload):
 
 async def _split_list(long_list: list) -> list:
     """
-    Splits long list into a list of shorter lists.
+    Splits a long list into a list of shorter lists.
     """
     list_length = len(long_list)
     if list_length <= CHUNK_SIZE:
@@ -1888,7 +1896,7 @@ async def _split_list(long_list: list) -> list:
 
 async def _send_function_stat(cluster_name, function, time_taken):
     """
-    Send function execution metrics to InfluxDB.
+    Send SFC function execution metrics to InfluxDB.
     """
     try:
         await send_to_influx("sfc_metrics,cluster=" + cluster_name + ",function=" + function + " " + "time_taken=" + str(time_taken) + "\n")
@@ -1899,7 +1907,7 @@ async def _send_function_stat(cluster_name, function, time_taken):
 
 async def time_diff_epoch(t1: str, t2: str) -> tuple:
     """
-    Calculate the difference between two timestamps in seconds and returns a tuple with the first time and time delta in seconds.
+    Calculate the difference between two timestamps in seconds and return a tuple with the first time and time delta in seconds.
 
     Example: T1 is the start time and T2 is the end time. The function returns T1 in seconds since epoch and T2 as integer delta vs. T2.
     t1 and t2 are ISO 8601-formatted strings. The primary use case is to calculate the time difference between the snapshot creation time and expiration time so that we can tell how recent t1 is and how long before t2 expires.
@@ -1938,11 +1946,25 @@ async def time_diff_epoch(t1: str, t2: str) -> tuple:
     return (ce_epoch)
 
 
-async def hi_freq_tasks():
+async def run_sf_task(task_func, session, auth):
     """
-    Run high-frequency (1-5 minutes) tasks for time-sensitive metrics.
+    Helper to run a SolidFire task with error handling for aiohttp and general exceptions.
+    """
+    try:
+        await task_func(session, auth)
+    except aiohttp.ContentTypeError as e:
+        logging.error(f"ContentTypeError in {task_func.__name__}: {e}")
+    except aiohttp.ClientResponseError as e:
+        logging.error(f"ClientResponseError in {task_func.__name__}: {e}")
+    except Exception as e:
+        logging.error(f"Unhandled exception in {task_func.__name__}: {e}")
 
-    May include some non-time-sensitive metrics if they have essential inputs for time-sensitive metrics.
+
+async def hi_freq_tasks(auth):
+    """
+    Run high-frequency (1-5 minute interval) tasks for time-sensitive metrics.
+
+    May call some non-time-sensitive functions if their output is essential for gathering time-sensitive metrics.
     """
     time_start = round(time.time(), 3)
     global ITERATION
@@ -1952,68 +1974,66 @@ async def hi_freq_tasks():
         str(ITERATION) +
         " of high-frequency tasks.")
     session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(
-        # enable_cleanup_closed=True, timeout_ceil_threshold=20),
-        # headers=headers)
-        enable_cleanup_closed=True), headers=headers)
+        enable_cleanup_closed=True), headers=sf_headers)
     task_list = [cluster_faults, cluster_performance,
                  node_performance, volume_performance, sync_jobs]
     logging.info('High-frequency tasks: ' + str(len(task_list)))
     bg_tasks = set()
     for t in task_list:
-        task = asyncio.create_task(t(session))
+        task = asyncio.create_task(run_sf_task(t, session, auth))
         bg_tasks.add(task)
         task.add_done_callback(bg_tasks.discard)
     await asyncio.gather(*bg_tasks)
     await session.close()
     time_end = round(time.time(), 3)
-    time_taken = time_end - time_start
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     logging.info('Completed combined high-frequency collection. Sending to InfluxDB next. Time taken: ' +
                  str(time_taken) + ' seconds.')
     return
 
 
-async def med_freq_tasks():
+async def med_freq_tasks(auth):
     """
-    Run medium-frequency (5-30 min) tasks for lower value operation data.
+    Run medium-frequency (5-30 min interval) tasks for less time-sensitive operation data.
     """
     time_start = round(time.time(), 3)
     session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(
-        enable_cleanup_closed=True, timeout_ceil_threshold=15), headers=headers)
+        enable_cleanup_closed=True, timeout_ceil_threshold=15), headers=sf_headers)
     task_list = [accounts, cluster_capacity, iscsi_sessions, volumes]
     logging.info('Medium-frequency tasks: ' + str(len(task_list)))
     bg_tasks = set()
     for t in task_list:
-        task = asyncio.create_task(t(session))
+        task = asyncio.create_task(run_sf_task(t, session, auth))
         bg_tasks.add(task)
         task.add_done_callback(bg_tasks.discard)
     await asyncio.gather(*bg_tasks)
     await session.close()
     time_end = round(time.time(), 3)
-    time_taken = time_end - time_start
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     logging.info('Completed medium-frequency collection and closed aiohttp session. Time taken: ' +
                  str(time_taken) + ' seconds.')
     return
 
 
-async def lo_freq_tasks():
+async def lo_freq_tasks(auth):
     """
-    Run low-frequency (0.5-3 hours) tasks for non-time-sensitive metrics and events.
+    Run low-frequency (0.5-3 hour interval) tasks for non-time-sensitive metrics and events.
     """
     time_start = round(time.time(), 3)
     session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(
-        enable_cleanup_closed=True, timeout_ceil_threshold=30), headers=headers)
+        enable_cleanup_closed=True, timeout_ceil_threshold=30), headers=sf_headers)
     task_list = [account_efficiency, cluster_version,
                  drive_stats, schedules, volume_efficiency]
     logging.info('Low-frequency tasks: ' + str(len(task_list)))
     bg_tasks = set()
     for t in task_list:
-        task = asyncio.create_task(t(session))
+        task = asyncio.create_task(run_sf_task(t, session, auth))
         bg_tasks.add(task)
         task.add_done_callback(bg_tasks.discard)
     await asyncio.gather(*bg_tasks)
     await session.close()
     time_end = round(time.time(), 3)
-    time_taken = time_end - time_start
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     logging.info('Completed low-frequency collection and closed aiohttp session. Time taken: ' +
                  str(time_taken) + ' seconds.')
     return
@@ -2025,8 +2045,8 @@ async def experimental():
     """
     time_start = round(time.time(), 3)
     session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(
-        enable_cleanup_closed=True, timeout_ceil_threshold=20), headers=headers)
-    task_list = [schedules, snapshot_groups, snapshots, volume_qos_histograms]
+        enable_cleanup_closed=True, timeout_ceil_threshold=20), headers=sf_headers)
+    task_list = [schedules, snapshot_groups, volume_qos_histograms]
     logging.info('Experimental tasks: ' + str(len(task_list)))
     bg_tasks = set()
     for t in task_list:
@@ -2036,49 +2056,33 @@ async def experimental():
     await asyncio.gather(*bg_tasks)
     await session.close()
     time_end = round(time.time(), 3)
-    time_taken = time_end - time_start
+    time_taken = max(0.0, round(time.time() - time_start, 3))
     logging.info('Completed combined experimental collection. Sending to InfluxDB next. Time taken: ' +
                  str(time_taken) + ' seconds.')
     return
 
 
-async def create_database(INFLUX_DB):
-    """
-    Create InfluxDB database if it does not exist.
-    """
-    urlRequest = 'http://' + INFLUX_HOST + ':' + \
-        INFLUX_PORT + '/query?q=SHOW DATABASES'
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(force_close=True, enable_cleanup_closed=True)) as session:
-        async with session.post(url=urlRequest) as r:
-            response = await r.json()
-    db_list = response['results'][0]['series'][0]['values']
-    for item in db_list:
-        if 'sfc' in item:
-            return
-        else:
-            query = 'CREATE DATABASE ' + INFLUX_DB + \
-                ' WITH DURATION 31d REPLICATION 1 NAME thirty_one_days'
-            urlRequest = 'http://' + INFLUX_HOST + ':' + \
-                INFLUX_PORT + '/query?q=' + query + INFLUX_DB
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(force_close=True, enable_cleanup_closed=True)) as session:
-                async with session.post(url=urlRequest) as r:
-                    response = await r.json()
-    logging.info('Exiting InfluxDB create database function.')
-    return
-
-
-async def get_cluster_name():
+async def get_cluster_name(auth):
     """
     Get cluster name from SolidFire cluster.
     """
     time_start = round(time.time(), 3)
     url = SF_URL + SF_JSON_PATH + '?method=GetClusterInfo'
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=True, force_close=True, enable_cleanup_closed=True), headers=headers) as session:
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=True, force_close=True, enable_cleanup_closed=True), headers=sf_headers, auth=auth) as session:
         async with session.get(url, allow_redirects=True) as resp:
-            result = await resp.json()
+            if resp.status != 200:
+                text = await resp.text()
+                logging.error(f"Failed to get cluster info. Status: {resp.status}, Response: {text}")
+                raise Exception(f"Failed to get cluster info. Status: {resp.status}")
+            try:
+                result = await resp.json(content_type=None)
+            except Exception:
+                text = await resp.text()
+                logging.error(f"Failed to decode JSON: {text}")
+                raise
     cluster_name = result['result']['clusterInfo']['name']
     time_end = round(time.time(), 3)
-    time_taken = time_end - time_start
+    time_taken = round(time_end - time_start, 3)
     logging.info(
         'Obtained SolidFire cluster name for tagging of SolidFire metrics: ' +
         str(cluster_name) +
@@ -2088,37 +2092,38 @@ async def get_cluster_name():
     return cluster_name
 
 
-# =============== main ========================================================
-
-
 async def main():
-    await create_database(INFLUX_DB)
-    # NOTE: global variable for iteration count in high-frequency tasks
     global ITERATION
     ITERATION = 0
-    global CHUNK_SIZE
+    # Prepare SolidFire auth
+    auth = aiohttp.BasicAuth(args.username, args.password)
     global CLUSTER_NAME
-    CLUSTER_NAME = await get_cluster_name()
+    CLUSTER_NAME = await get_cluster_name(auth)
+    # Ensure InfluxDB database exists or create it
+    await create_database_v3(INFLUX_DB)
+    # Example: schedule hi/med/lo freq tasks with auth
     scheduler = AsyncIOScheduler(misfire_grace_time=10)
-    scheduler.add_job(
-        hi_freq_tasks,
-        'interval',
-        seconds=INT_HI_FREQ,
-        max_instances=1)
-    scheduler.add_job(med_freq_tasks, 'interval', seconds=INT_MED_FREQ)
-    scheduler.add_job(lo_freq_tasks, 'interval', seconds=INT_LO_FREQ)
-    if args.experimental == True:
-        logging.warning(
-            'Experimental collectors enabled - adding experimental tasks.')
-        scheduler.add_job(experimental, 'interval',
-                          seconds=INT_EXPERIMENTAL_FREQ)
-    else:
-        logging.info(
-            'Experimental collectors disabled. Not scheduling experimental tasks.')
-    logging.warning('Starting scheduler.')
+    scheduler.add_job(hi_freq_tasks, 'interval', seconds=INT_HI_FREQ, max_instances=1, args=[auth])
+    scheduler.add_job(med_freq_tasks, 'interval', seconds=INT_MED_FREQ, max_instances=1, args=[auth])
+    scheduler.add_job(lo_freq_tasks, 'interval', seconds=INT_LO_FREQ, max_instances=1, args=[auth])
     scheduler.start()
     while True:
-        await asyncio.sleep(100)
+        await asyncio.sleep(3600)
+
+
+async def run_all_sf_tasks(auth):
+    """
+    Create dedicated session for SolidFire API calls with correct auth and headers, and run all SF tasks.
+    """
+    async with aiohttp.ClientSession(auth=auth, headers=sf_headers) as session:
+        task_list = [cluster_faults, cluster_performance, node_performance, volume_performance, sync_jobs,
+                     accounts, account_efficiency, volume_efficiency, cluster_capacity, cluster_version, drive_stats, schedules, snapshot_groups, volumes]
+        bg_tasks = set()
+        for t in task_list:
+            task = asyncio.create_task(run_sf_task(t, session, auth))
+            bg_tasks.add(task)
+            task.add_done_callback(bg_tasks.discard)
+        await asyncio.gather(*bg_tasks)
 
 
 if __name__ == '__main__':
@@ -2146,18 +2151,24 @@ if __name__ == '__main__':
         default=os.environ.get(
             'SF_PASSWORD',
             ''),
-        help='password for admin account on SolidFire cluster. Default: SF_PASSWORD.')
-    parser.add_argument('-ih', '--influxdb-host', nargs='?', const=1, type=str, default=INFLUX_HOST,
+        help='password for admin account on SolidFire cluster. Default: SF_PASSWORD or, if empty, prompt to provide it.')
+    parser.add_argument('-ih', '--influxdb-host', nargs='?', const=1, type=str,
+                        default=os.environ.get('INFLUX_HOST', INFLUX_HOST),
                         required=False, help='host IP or name of InfluxDB. Default: ' + INFLUX_HOST)
     parser.add_argument('-ip', '--influxdb-port', nargs='?', const=1, type=int,
-                        default=INFLUX_PORT, required=False, help='port of InfluxDB. Default: ' + INFLUX_PORT)
-    parser.add_argument('-id', '--influxdb-name', nargs='?', const=1, type=str, default=INFLUX_DB, required=False,
+                        default=os.environ.get('INFLUX_PORT', INFLUX_PORT),
+                        required=False, help='HTTPS port of InfluxDB. Default: ' + INFLUX_PORT)
+    parser.add_argument('-id', '--influxdb-name', nargs='?', const=1, type=str,
+                        default=os.environ.get('INFLUX_DB', INFLUX_DB), required=False,
                         help='name of InfluxDB database to use. SFC creates it if it does not exist. Default: ' + INFLUX_DB)
-    parser.add_argument('-fh', '--frequency-high', nargs='?', const=1, type=str, default=INT_HI_FREQ, required=False, metavar='HI',
+    parser.add_argument('-fh', '--frequency-high', nargs='?', const=1, type=str,
+                        default=os.environ.get('INT_HI_FREQ', INT_HI_FREQ), required=False, metavar='HI',
                         choices=['60', '120', '180', '300'], help='high-frequency collection interval in seconds. Default: ' + str(INT_HI_FREQ))
-    parser.add_argument('-fm', '--frequency-med', nargs='?', const=1, type=str, default=INT_MED_FREQ, required=False, metavar='MED',
+    parser.add_argument('-fm', '--frequency-med', nargs='?', const=1, type=str,
+                        default=os.environ.get('INT_MED_FREQ', INT_MED_FREQ), required=False, metavar='MED',
                         choices=["300", "600", "900"], help='medium-frequency collection interval in seconds. Default: ' + str(INT_MED_FREQ))
-    parser.add_argument('-fl', '--frequency-low', nargs='?', const=1, type=str, default=INT_LO_FREQ, required=False, metavar='LO',
+    parser.add_argument('-fl', '--frequency-low', nargs='?', const=1, type=str,
+                        default=os.environ.get('INT_LO_FREQ', INT_LO_FREQ), required=False, metavar='LO',
                         choices=["1800", "3600", "7200", "10800"], help='low-frequency collection interval in seconds. Default: ' + str(INT_LO_FREQ))
     parser.add_argument('-ex', '--experimental', action='store_true', required=False,
                         help='use this switch to enable collection of experimental metrics such as volume QoS histograms (interval: 600s, fixed). Default: (disabled, with switch absent)')
@@ -2167,15 +2178,22 @@ if __name__ == '__main__':
                         required=False, help='log file name. SFC logs only to console by default. Default: None')
     parser.add_argument('-c', '--ca-chain', nargs='?', const=1, type=str, default=None, required=False,
                         help='Optional filename with your (full) CA chain to be copied to the Ubuntu/Debian/Alpine OS certificate store. Users of other systems may import manually. Default: None')
+    parser.add_argument('-v', '--version', action='store_true', required=False,
+                        help='Show program version and exit.')
     args = parser.parse_args()
+
+    if args.version:
+        print("SFC Version: " + VERSION)
+        sys.exit(0)
 
     FORMAT = '%(asctime)-15s - %(levelname)s - %(funcName)s - %(lineno)d - %(message)s'
     if args.logfile:
-        logging.info('Logging to file: ' + args.logfile)
         logging.basicConfig(filename=args.logfile, level=args.loglevel,
                             format=FORMAT, datefmt='%Y-%m-%dT%H:%M:%SZ')
-        logging.handlers.RotatingFileHandler(
-            filename=args.logfile, mode='a', maxBytes=10000000, backupCount=1, encoding=None, delay=True)
+        handler = RotatingFileHandler(args.logfile, mode='a', maxBytes=10000000, backupCount=1, encoding=None, delay=True)
+        handler.setFormatter(logging.Formatter(FORMAT, datefmt='%Y-%m-%dT%H:%M:%SZ'))
+        logging.getLogger().addHandler(handler)
+        logging.info('Logging to file: ' + args.logfile)
     else:
         logging.basicConfig(level=args.loglevel, format=FORMAT,
                             datefmt='%Y-%m-%dT%H:%M:%SZ')
@@ -2216,8 +2234,8 @@ if __name__ == '__main__':
     else:
         logging.info('Experimental collectors disabled (recommended default)')
 
-    if args.ca_chain is not None and platform.system() == 'Linux' and (platform.dist(
-    )[0] == 'Ubuntu' or platform.dist()[0] == 'Debian' or platform.dist()[0] == 'Alpine'):
+    
+    if args.ca_chain is not None and platform.system() == 'Linux' and (distro.id() in ['ubuntu', 'debian', 'alpine']):
         if os.path.exists(args.c):
             logging.info('Copying CA chain to OS certificate store.')
             os.system(
@@ -2232,14 +2250,13 @@ if __name__ == '__main__':
                     args.ca_chain))
             os.system('sudo update-ca-certificates')
             logging.info('OS certificate store refreshed.')
-
         else:
             logging.error('CA chain file not found. Exiting.')
             sys.exit(1)
 
-    # The below works for SolidFire 12.5, 12.7 or higher v12
+    # The below works for SolidFire 12.5, 12.7 or a higher v12
     SF_JSON_PATH = '/json-rpc/12.5/'
-    SF_URL = 'https://' + args.username + ":" + args.password + '@' + SF_MVIP
+    SF_URL = 'https://' + SF_MVIP
     SF_POST_URL = SF_URL + SF_JSON_PATH
 
     try:
