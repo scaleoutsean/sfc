@@ -11,7 +11,7 @@
 #                                                                             #
 # Author: @scaleoutSean                                                       #
 # https://github.com/scaleoutsean/sfc                                         #
-# License: the Apache License Version 2.0                                     #
+# License: the Apache License Version 2.1                                     #
 ###############################################################################
 
 # =============== imports =====================================================
@@ -34,8 +34,6 @@ import platform
 import random
 import re
 import sys
-if not sys.warnoptions:
-    import os
 import warnings
 import time
 # import urllib.parse
@@ -52,7 +50,7 @@ VERSION = '2.1.0'
 # values.
 # INFLUX_HOST, INFLUX_PORT, INFLUX_DB, INFLUXDB3_AUTH_TOKEN, SF_MVIP, SF_USERNAME, SF_PASSWORD
 INFLUX_HOST = '192.168.1.146'
-INFLUX_PORT = '8181' # default port for InfluxDB 3; sfc.py accesses it over HTTPS 
+INFLUX_PORT = '8181'  # default port for InfluxDB 3; sfc.py accesses it over HTTPS
 INFLUX_DB = 'sfc'
 INFLUXDB3_AUTH_TOKEN = 'apiv3_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
 SF_MVIP = '192.168.1.34'
@@ -73,13 +71,26 @@ INT_EXPERIMENTAL_FREQ = 600
 
 # Check the source code below to see what this does (submits volume metrics in batches)
 CHUNK_SIZE = 24
+
+# Global iteration counter
+ITERATION = 0
+
+# Global variables - will be initialized based on configuration
+SF_JSON_PATH = '/json-rpc/12.5/'  # Default path, may be overridden
+SF_URL = f'https://{SF_MVIP}'  # Constructed from SF_MVIP
+SF_POST_URL = f'https://{SF_MVIP}/json-rpc/12.5/'  # Default URL
+CLUSTER_NAME = 'unknown'  # Will be set after connecting
+args = None  # Will be set by argparse
+
 # =============== functions code ==============================================
 
 
 # SolidFire headers (NO Authorization key!)
 sf_headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
 # InfluxDB headers (Bearer token)
-influx_headers = {'Accept': 'application/json', 'Accept-Encoding': 'deflate, gzip;q=1.0, *;q=0.5', 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + INFLUXDB3_AUTH_TOKEN}
+influx_headers = {'Accept': 'application/json', 'Accept-Encoding': 'deflate, gzip;q=1.0, *;q=0.5',
+                  'Content-Type': 'application/json', 'Authorization': 'Bearer ' + INFLUXDB3_AUTH_TOKEN}
+
 
 async def sf_api_post(session, url, payload, auth):
     """
@@ -106,6 +117,7 @@ async def sf_api_post(session, url, payload, auth):
             logging.error(f"[SF DEBUG] Exception: {e}")
             logging.error(f"[SF DEBUG] Raw response text: {text}")
             raise
+
 
 async def volumes(session, auth, **kwargs):
     """
@@ -212,7 +224,7 @@ async def volumes(session, auth, **kwargs):
         for volume in result:
             single_volume = "volumes,cluster=" + CLUSTER_NAME + ","
             # NOTE: this needs to be an integer in InfluxDB. None won't work
-            if (volume['qosPolicyID'] is None):
+            if volume['qosPolicyID'] is None:
                 volume['qosPolicyID'] = 0
             # NOTE: this section gathers volume pairing information when
             # volumePairs is not empty
@@ -246,7 +258,7 @@ async def volumes(session, auth, **kwargs):
                 logging.debug(
                     'Volume replication not enabled for volume ' + str(volume['volumeID']) + '.')
 
-            if volume_paired == True:
+            if volume_paired:
                 tags = tags_paired
                 fields = fields_paired
             else:
@@ -261,7 +273,7 @@ async def volumes(session, auth, **kwargs):
                     single_volume = single_volume + kv + ","
                 else:
                     single_volume = single_volume + kv + " "
-                if volume_paired == True:
+                if volume_paired:
                     if args.loglevel == 'DEBUG':
                         logging.debug("single_volume tags for volume " +
                                       str(volume['volumeID']) + ": " + str(single_volume))
@@ -291,7 +303,6 @@ async def volumes(session, auth, **kwargs):
                 except Exception as e:
                     logging.error(
                         'Error while extracting Trident volume attributes: ' + str(e) + '.')
-                    pass
             else:
                 if args.loglevel == 'DEBUG':
                     logging.debug('No attributes found for volume ' +
@@ -307,7 +318,7 @@ async def volumes(session, auth, **kwargs):
                     single_volume = single_volume + kv + ","
                 else:
                     single_volume = single_volume + kv + " "
-                if volume_paired == True:
+                if volume_paired:
                     if args.loglevel == 'DEBUG':
                         logging.debug("single_volume tags for volume + " +
                                       str(volume['volumeID']) + ": " + str(single_volume))
@@ -448,7 +459,7 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
         str(time_taken) +
         ' seconds.')
     await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
-    if vp != {}:
+    if vp:
         return vp
     else:
         logging.warning('Volume pair data not extracted. Returning empty dict.')
@@ -575,11 +586,9 @@ async def sync_jobs(session, auth):
                 sync_jobs = sync_jobs + single_sync_job + "\n"
             else:
                 if args.loglevel == 'DEBUG':
-                    logging.debug(
-                        'Sync job type ' +
-                        str(
-                            i['type']) +
-                        ' is not yet supported. You may submit this record to have it considered for inclusion in SFC. Skipping.')
+                    logging.debug('Sync job type ' +
+                                  str(i['type']) +
+                                  ' is not yet supported. You may submit this record to have it considered for inclusion in SFC. Skipping.')
                 logging.info('Skipped sync job: ' + str(i))
     await send_to_influx(sync_jobs)
     time_taken = max(0.0, round(time.time() - time_start, 3))
@@ -742,7 +751,7 @@ async def accounts(session, auth):
     async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
         r = await response.json()
     for account in r['result']['accounts']:
-        if (account['enableChap'] == True):
+        if (account['enableChap']):
             try:
                 # NOTE: remove CHAP secrets
                 account.pop('initiatorSecret')
@@ -751,7 +760,6 @@ async def accounts(session, auth):
                 # NOTE: if they don't exist, we don't need to remove them
                 logging.warning(
                     "Did not find account (CHAP) secrets to remove from API response" + str(account['accountID']))
-                pass
         if len(account['volumes']) > 0:
             volume_count = str(len(account['volumes']))
         else:
@@ -852,8 +860,8 @@ async def volume_efficiency(session, auth):
                 storage_efficiency = round(
                     r['result']['deduplication'] * r['result']['compression'], 2)
                 thin_provisioning = round(r['result']['thinProvisioning'], 2)
-                volume_id_efficiency = "volume_efficiency,cluster=" + CLUSTER_NAME + ",id=" + str(volume[0]) + ",name=" + str(volume[1]) + " " + "compression=" + str(compression) + ",deduplication=" + str(
-                    deduplication) + ",storage_efficiency=" + str(storage_efficiency) + ",thin_provisioning=" + str(thin_provisioning) + "\n"
+                volume_id_efficiency = "volume_efficiency,cluster=" + CLUSTER_NAME + ",id=" + str(volume[0]) + ",name=" + str(volume[1]) + " " + "compression=" + str(
+                    compression) + ",deduplication=" + str(deduplication) + ",storage_efficiency=" + str(storage_efficiency) + ",thin_provisioning=" + str(thin_provisioning) + "\n"
                 volume_efficiency = volume_efficiency + volume_id_efficiency
                 await send_to_influx(volume_efficiency)
 
@@ -877,7 +885,7 @@ async def cluster_faults(session, auth):
         r = await response.json()
     group = {'bestPractices': 0, 'error': 0, 'critical': 0, 'warning': 0}
     for fault in r['result']['faults']:
-        if fault['severity'] in group and fault['resolved'] == False:
+        if fault['severity'] in group and fault['resolved'] is False:
             group[fault['severity']] += 1
     if group['critical'] > 0 or group['error'] > 0 or group['warning'] > 0 or group['bestPractices'] > 0:
         faults_total = str(
@@ -906,7 +914,7 @@ async def volume_qos_histograms(session, auth):
     await asyncio.sleep(sleep_delay)
     time_start = round(time.time(), 3)
     function_name = 'volume_qos_histograms'
-    if args.experimental == False:
+    if not args.experimental:
         logging.warning('QoS histograms are not enabled. Returning...')
         return
     volumes_dict = None
@@ -1014,8 +1022,8 @@ async def qos_histogram_processor(hg, **kwargs):
             'id=' + str(vol_id_name[0]) + 'i' + '\n'
         volume_kvs_string = volume_kvs_string[:-1]
         if args.loglevel == 'DEBUG':
-            logging.debug(
-                "QoS histogram records (n=" + str(n) + ") for volume " + str(vol_id_name[0]) + ":\n" + str(volume_kvs_string))
+            logging.debug("QoS histogram records (n=" + str(n) + ") for volume " +
+                          str(vol_id_name[0]) + ":\n" + str(volume_kvs_string))
         volume_payload = volume_payload + volume_kvs_string + "\n"
         n = n + 1
     await send_to_influx(volume_payload)
@@ -1036,8 +1044,19 @@ async def node_performance(session, auth):
     result = r['result']['nodeStats']['nodes']
     metrics = [("cpu", "cpu"), ("networkUtilizationCluster", "network_utilization_cluster"),
                ("networkUtilizationStorage", "network_utilization_storage")]
-    load_histogram_metrics = [("Bucket0", "bucket_00_00"), ("Bucket1To19", "bucket_01_to_19"), ("Bucket20To39", "bucket_20_to_39"), (
-        "Bucket40To59", "bucket_40_to_59"), ("Bucket60To79", "bucket_60_to_79"), ("Bucket80To100", "bucket_80_to_100")]
+    load_histogram_metrics = [
+        ("Bucket0",
+         "bucket_00_00"),
+        ("Bucket1To19",
+         "bucket_01_to_19"),
+        ("Bucket20To39",
+         "bucket_20_to_39"),
+        ("Bucket40To59",
+            "bucket_40_to_59"),
+        ("Bucket60To79",
+         "bucket_60_to_79"),
+        ("Bucket80To100",
+         "bucket_80_to_100")]
     node_performance = ''
     for node in result:
         metric_details = ''
@@ -1471,7 +1490,7 @@ async def schedules(session, auth):
             if 'scheduleInfo' in schedule:
                 for k in ['enableRemoteReplication', 'enableSerialCreation']:
                     if k in schedule['scheduleInfo']:
-                        if schedule['scheduleInfo'][k] == True:
+                        if schedule['scheduleInfo'][k]:
                             schedule['scheduleInfo'][k] = 1
                         else:
                             # NOTE: set to 0 if not True to avoid having to
@@ -1507,7 +1526,7 @@ async def schedules(session, auth):
                         logging.debug(
                             "Key >> " + str(key) + " << not in schedule keys")
             for key in ['hasError', 'paused', 'recurring', 'runNextInterval']:
-                if schedule[key] == True:
+                if schedule[key]:
                     schedule[key] = 1
                 else:
                     schedule[key] = 0
@@ -1576,7 +1595,7 @@ async def schedules(session, auth):
 async def snapshot_groups(session, auth):
     """
     Use ListGroupSnapshots to get information about group snapshots and send a subset of each to InfluxDB.
-    
+
     If there are no group snapshots, the payload will be empty and no data will be sent to InfluxDB.
     """
     function_name = 'snapshot_groups'
@@ -1648,7 +1667,7 @@ async def snapshot_groups(session, auth):
         for s in snap_pop:
             if s in snapshot:
                 snapshot.pop(s)
-        if snapshot['enableRemoteReplication'] == False:
+        if not snapshot['enableRemoteReplication']:
             snapshot['enableRemoteReplication'] = 0
         else:
             snapshot['enableRemoteReplication'] = 1
@@ -1685,12 +1704,16 @@ async def snapshot_groups(session, auth):
                     try:
                         if tag[0] in snapshot['remoteStatuses'][0].keys():
                             tag_val = snapshot['remoteStatuses'][0][tag[0]]
+                        else:
+                            tag_val = "0"
                     except BaseException:
                         logging.debug(
                             "Tag " + str(
                                 tag[0]) + " does NOT exist in snapshot or snapshot-remoteStatuses: ",
                             snapshot['remoteStatuses'][0].keys())
                         tag_val = "0"
+                else:
+                    tag_val = "0"
             else:
                 if args.loglevel == 'DEBUG':
                     logging.debug("Tag  " +
@@ -1761,7 +1784,7 @@ async def list_database():
                 if logging.getLogger().isEnabledFor(logging.DEBUG):
                     logging.debug(f"List of databases: {data}")
                 dbs = [list(db.values())[0] for db in data]
-                return (dbs)    
+                return dbs
             else:
                 text = await r.text()
                 logging.error(f"Failed to list databases. Status: {r.status}, Response: {text}")
@@ -1778,7 +1801,7 @@ async def create_database_v3(INFLUX_DB):
         'Content-Type': 'application/json'
     }
     payload = {"db": INFLUX_DB}
-    dbs = await list_database()    
+    dbs = await list_database()
     if INFLUX_DB in dbs:
         logging.info(f"Database '{INFLUX_DB}' exists in InfluxDB. Skipping creation of new database.")
         return
@@ -1788,7 +1811,8 @@ async def create_database_v3(INFLUX_DB):
         async with session.post(url, headers=headers, json=payload) as r:
             if r.status == 200:
                 if logging.getLogger().isEnabledFor(logging.DEBUG):
-                    logging.debug(msg=f"Database '{INFLUX_DB}' created or already exists (HTTP 200). Checking existence...")
+                    logging.debug(
+                        msg=f"Database '{INFLUX_DB}' created or already exists (HTTP 200). Checking existence...")
                 return
             else:
                 text = await r.text()
@@ -1813,7 +1837,7 @@ async def send_to_influx(payload):
     if measurement is None or measurement == '':
         logging.error('Measurement is empty or null. Cannot send data to InfluxDB.')
         logging.error('Payload:\n' + str(payload))
-        return False    
+        return False
     # If payload is 0 lines, we cannot send data to InfluxDB, so error out, print payload, and return False
     if payload is None or payload == '' or payload.count('\n') == 0:
         logging.error('Payload is empty or has no lines. Cannot send data to InfluxDB.')
@@ -1864,7 +1888,7 @@ async def send_to_influx(payload):
                       measurement + ', response code: ' + str(resp))
         logging.error('Payload:\n' + str(payload))
         return False
-    else:        
+    else:
         # Do not log successful sends unless in DEBUG mode
         if args.loglevel == 'DEBUG':
             logging.debug('send_to_influx() for ' +
@@ -1943,7 +1967,7 @@ async def time_diff_epoch(t1: str, t2: str) -> tuple:
         exit(400)
     if args.loglevel == 'DEBUG':
         logging.debug("==> Time difference in seconds: " + str(ce_epoch) + ".")
-    return (ce_epoch)
+    return ce_epoch
 
 
 async def run_sf_task(task_func, session, auth):
@@ -2039,7 +2063,7 @@ async def lo_freq_tasks(auth):
     return
 
 
-async def experimental():
+async def experimental(auth):
     """
     Runs one or more medium-frequency and experimental collector tasks.
     """
@@ -2050,7 +2074,7 @@ async def experimental():
     logging.info('Experimental tasks: ' + str(len(task_list)))
     bg_tasks = set()
     for t in task_list:
-        task = asyncio.create_task(t(session))
+        task = asyncio.create_task(t(session, auth))
         bg_tasks.add(task)
         task.add_done_callback(bg_tasks.discard)
     await asyncio.gather(*bg_tasks)
@@ -2073,7 +2097,7 @@ async def get_cluster_name(auth):
             if resp.status != 200:
                 text = await resp.text()
                 logging.error(f"Failed to get cluster info. Status: {resp.status}, Response: {text}")
-                raise Exception(f"Failed to get cluster info. Status: {resp.status}")
+                raise RuntimeError(f"Failed to get cluster info. Status: {resp.status}")
             try:
                 result = await resp.json(content_type=None)
             except Exception:
@@ -2093,11 +2117,10 @@ async def get_cluster_name(auth):
 
 
 async def main():
-    global ITERATION
+    global ITERATION, CLUSTER_NAME, SF_URL, SF_JSON_PATH, SF_POST_URL, args
     ITERATION = 0
     # Prepare SolidFire auth
     auth = aiohttp.BasicAuth(args.username, args.password)
-    global CLUSTER_NAME
     CLUSTER_NAME = await get_cluster_name(auth)
     # Ensure InfluxDB database exists or create it
     await create_database_v3(INFLUX_DB)
@@ -2116,8 +2139,21 @@ async def run_all_sf_tasks(auth):
     Create dedicated session for SolidFire API calls with correct auth and headers, and run all SF tasks.
     """
     async with aiohttp.ClientSession(auth=auth, headers=sf_headers) as session:
-        task_list = [cluster_faults, cluster_performance, node_performance, volume_performance, sync_jobs,
-                     accounts, account_efficiency, volume_efficiency, cluster_capacity, cluster_version, drive_stats, schedules, snapshot_groups, volumes]
+        task_list = [
+            cluster_faults,
+            cluster_performance,
+            node_performance,
+            volume_performance,
+            sync_jobs,
+            accounts,
+            account_efficiency,
+            volume_efficiency,
+            cluster_capacity,
+            cluster_version,
+            drive_stats,
+            schedules,
+            snapshot_groups,
+            volumes]
         bg_tasks = set()
         for t in task_list:
             task = asyncio.create_task(run_sf_task(t, session, auth))
@@ -2158,26 +2194,90 @@ if __name__ == '__main__':
     parser.add_argument('-ip', '--influxdb-port', nargs='?', const=1, type=int,
                         default=os.environ.get('INFLUX_PORT', INFLUX_PORT),
                         required=False, help='HTTPS port of InfluxDB. Default: ' + INFLUX_PORT)
-    parser.add_argument('-id', '--influxdb-name', nargs='?', const=1, type=str,
-                        default=os.environ.get('INFLUX_DB', INFLUX_DB), required=False,
-                        help='name of InfluxDB database to use. SFC creates it if it does not exist. Default: ' + INFLUX_DB)
-    parser.add_argument('-fh', '--frequency-high', nargs='?', const=1, type=str,
-                        default=os.environ.get('INT_HI_FREQ', INT_HI_FREQ), required=False, metavar='HI',
-                        choices=['60', '120', '180', '300'], help='high-frequency collection interval in seconds. Default: ' + str(INT_HI_FREQ))
-    parser.add_argument('-fm', '--frequency-med', nargs='?', const=1, type=str,
-                        default=os.environ.get('INT_MED_FREQ', INT_MED_FREQ), required=False, metavar='MED',
-                        choices=["300", "600", "900"], help='medium-frequency collection interval in seconds. Default: ' + str(INT_MED_FREQ))
-    parser.add_argument('-fl', '--frequency-low', nargs='?', const=1, type=str,
-                        default=os.environ.get('INT_LO_FREQ', INT_LO_FREQ), required=False, metavar='LO',
-                        choices=["1800", "3600", "7200", "10800"], help='low-frequency collection interval in seconds. Default: ' + str(INT_LO_FREQ))
-    parser.add_argument('-ex', '--experimental', action='store_true', required=False,
-                        help='use this switch to enable collection of experimental metrics such as volume QoS histograms (interval: 600s, fixed). Default: (disabled, with switch absent)')
+    parser.add_argument(
+        '-id',
+        '--influxdb-name',
+        nargs='?',
+        const=1,
+        type=str,
+        default=os.environ.get(
+            'INFLUX_DB',
+            INFLUX_DB),
+        required=False,
+        help='name of InfluxDB database to use. SFC creates it if it does not exist. Default: ' +
+        INFLUX_DB)
+    parser.add_argument(
+        '-fh',
+        '--frequency-high',
+        nargs='?',
+        const=1,
+        type=str,
+        default=os.environ.get(
+            'INT_HI_FREQ',
+            INT_HI_FREQ),
+        required=False,
+        metavar='HI',
+        choices=[
+            '60',
+            '120',
+            '180',
+            '300'],
+        help='high-frequency collection interval in seconds. Default: ' +
+        str(INT_HI_FREQ))
+    parser.add_argument(
+        '-fm',
+        '--frequency-med',
+        nargs='?',
+        const=1,
+        type=str,
+        default=os.environ.get(
+            'INT_MED_FREQ',
+            INT_MED_FREQ),
+        required=False,
+        metavar='MED',
+        choices=[
+            "300",
+            "600",
+            "900"],
+        help='medium-frequency collection interval in seconds. Default: ' +
+        str(INT_MED_FREQ))
+    parser.add_argument(
+        '-fl',
+        '--frequency-low',
+        nargs='?',
+        const=1,
+        type=str,
+        default=os.environ.get(
+            'INT_LO_FREQ',
+            INT_LO_FREQ),
+        required=False,
+        metavar='LO',
+        choices=[
+            "1800",
+            "3600",
+            "7200",
+            "10800"],
+        help='low-frequency collection interval in seconds. Default: ' +
+        str(INT_LO_FREQ))
+    parser.add_argument(
+        '-ex',
+        '--experimental',
+        action='store_true',
+        required=False,
+        help='use this switch to enable collection of experimental metrics such as volume QoS histograms (interval: 600s, fixed). Default: (disabled, with switch absent)')
     parser.add_argument('-ll', '--loglevel', nargs='?', const=1, type=str, default='INFO', required=False, choices=(
         'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'), help='log level for console output. Default: INFO')
     parser.add_argument('-lf', '--logfile', nargs='?', const=1, type=str, default=None,
                         required=False, help='log file name. SFC logs only to console by default. Default: None')
-    parser.add_argument('-c', '--ca-chain', nargs='?', const=1, type=str, default=None, required=False,
-                        help='Optional filename with your (full) CA chain to be copied to the Ubuntu/Debian/Alpine OS certificate store. Users of other systems may import manually. Default: None')
+    parser.add_argument(
+        '-c',
+        '--ca-chain',
+        nargs='?',
+        const=1,
+        type=str,
+        default=None,
+        required=False,
+        help='Optional filename with your (full) CA chain to be copied to the Ubuntu/Debian/Alpine OS certificate store. Users of other systems may import manually. Default: None')
     parser.add_argument('-v', '--version', action='store_true', required=False,
                         help='Show program version and exit.')
     args = parser.parse_args()
@@ -2190,7 +2290,13 @@ if __name__ == '__main__':
     if args.logfile:
         logging.basicConfig(filename=args.logfile, level=args.loglevel,
                             format=FORMAT, datefmt='%Y-%m-%dT%H:%M:%SZ')
-        handler = RotatingFileHandler(args.logfile, mode='a', maxBytes=10000000, backupCount=1, encoding=None, delay=True)
+        handler = RotatingFileHandler(
+            args.logfile,
+            mode='a',
+            maxBytes=10000000,
+            backupCount=1,
+            encoding=None,
+            delay=True)
         handler.setFormatter(logging.Formatter(FORMAT, datefmt='%Y-%m-%dT%H:%M:%SZ'))
         logging.getLogger().addHandler(handler)
         logging.info('Logging to file: ' + args.logfile)
@@ -2229,12 +2335,11 @@ if __name__ == '__main__':
         str(INT_LO_FREQ) +
         ' seconds.')
 
-    if args.experimental == True:
+    if args.experimental:
         logging.warning('Experimental collectors enabled.')
     else:
         logging.info('Experimental collectors disabled (recommended default)')
 
-    
     if args.ca_chain is not None and platform.system() == 'Linux' and (distro.id() in ['ubuntu', 'debian', 'alpine']):
         if os.path.exists(args.c):
             logging.info('Copying CA chain to OS certificate store.')
@@ -2264,5 +2369,4 @@ if __name__ == '__main__':
     except (KeyboardInterrupt, SystemExit):
         pass
     except Exception as e:
-        logging.info("Exception:", str(e))
-        pass
+        logging.info("Exception: %s", str(e))
