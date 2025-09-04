@@ -1,4 +1,9 @@
-FROM python:3.12.11-alpine3.22@sha256:c610e4a94a0e8b888b4b225bfc0e6b59dee607b1e61fb63ff3926083ff617216
+# Set default Python version (can be overridden at build time)
+ARG PYTHON_VERSION=3.12.11-alpine3.22
+ARG PYTHON_DIGEST=sha256:c610e4a94a0e8b888b4b225bfc0e6b59dee607b1e61fb63ff3926083ff617216
+
+FROM python:${PYTHON_VERSION}@${PYTHON_DIGEST}
+# https://hub.docker.com/layers/library/python/3.12.11-alpine3.22/images/sha256-c7faa49938b528b23f0d3f900d6c3e11e16ded420852d327f58267547d26f915
 # https://hub.docker.com/layers/library/python/3.12.11-alpine3.22/images/sha256-c7faa49938b528b23f0d3f900d6c3e11e16ded420852d327f58267547d26f915
 
 LABEL maintainer="@scaleoutSean"

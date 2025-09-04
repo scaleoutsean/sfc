@@ -1,11 +1,11 @@
 services:
   s3:
-    image: versitys3gw:${VERSITY_S3GW_VERSION}
+    image: sfc/versitys3gw:${VERSITY_S3GW_VERSION}
     build:
       context: s3
       dockerfile: Dockerfile
       args:
-        VERSITY_VERSION: ${VERSITY_S3GW_VERSION}
+        VERSITY_S3GW_VERSION: ${VERSITY_S3GW_VERSION}
     container_name: s3
     restart: unless-stopped
     volumes:
@@ -33,12 +33,16 @@ services:
 
   influxdb:
     container_name: influxdb3-core
-    image: influxdb:${INFLUXDB3_VERSION}
+    image: sfc/influxdb:${INFLUXDB3_VERSION}
     build:
       context: influxdb
       dockerfile: Dockerfile
+      args:
+        INFLUXDB3_BUILD_VERSION: ${INFLUXDB3_BUILD_VERSION}
     ports:
       - "${INFLUXDB_PORT}:8181"
+      # Port 8182 (admin token recovery) is NOT exposed externally for security
+      # It's only accessible within the Docker network for internal token generation
     environment:
       S3_ENDPOINT: https://s3:7070
       TLS_KEY: /home/influxdb3/certs/influxdb.key
@@ -53,6 +57,8 @@ services:
       BUCKET: ${S3_BUCKET}
       INFLUXDB3_ADMIN_TOKEN: ${INFLUXDB_ADMIN_TOKEN}
       TOKEN_FILE: /influxdb_tokens/sfc.token
+      # Disable anonymous usage analytics (InfluxDB3 specific)
+      INFLUXDB3_TELEMETRY_DISABLE_UPLOAD: ${INFLUXDB3_TELEMETRY_DISABLE_UPLOAD}
     volumes:
       - ./data/influxdb:/var/lib/influxdb3
       - ./data/influxdb_credentials/credentials:/influxdb_credentials/credentials:ro
@@ -68,9 +74,13 @@ services:
         ipv4_address: ${INFLUXDB_IP}
 
   sfc:
+    image: sfc/sfc:latest
     build:
       context: sfc
       dockerfile: Dockerfile
+      args:
+        PYTHON_VERSION: ${PYTHON_VERSION}
+        PYTHON_DIGEST: ${PYTHON_DIGEST}
     container_name: sfc
     environment:
       INFLUX_HOST: influxdb
@@ -96,6 +106,7 @@ services:
         ipv4_address: ${SFC_IP}
 
   utils:
+    image: sfc/utils:latest
     build:
       context: ./utils-container
     container_name: utils
@@ -142,6 +153,37 @@ services:
     networks:
       sfc:
         ipv4_address: ${GRAFANA_IP}
+
+  explorer:
+    image: sfc/influxdb3-explorer:${INFLUXDB3_EXPLORER_VERSION}
+    build:
+      context: .
+      dockerfile: explorer/Dockerfile
+      args:
+        INFLUXDB3_EXPLORER_VERSION: ${INFLUXDB3_EXPLORER_VERSION}
+    container_name: influxdb3-explorer
+    restart: unless-stopped
+    ports:
+      - "${EXPLORER_PORT}:443"
+      # - "8080:80" # For non-TLS access (not recommended)
+    environment:
+      SSL_CERT_PATH: /etc/nginx/ssl/cert.pem
+      SSL_KEY_PATH: /etc/nginx/ssl/key.pem
+      DATABASE_URL: /db/sqlite.db
+      NODE_ENV: production
+    command:
+      - "--mode=admin"
+    volumes:
+      - ./data/explorer/db:/db:rw
+      - ./data/explorer/config:/app-root/config:ro
+      # InfluxDB Explorer's TLS certificates (expects cert.pem and key.pem)
+      - ./certs/explorer:/etc/nginx/ssl:ro
+      - ./certs/explorer/ca.crt:/usr/local/share/ca-certificates/ca.crt:ro
+    depends_on:
+      - influxdb
+    networks:
+      sfc:
+        ipv4_address: ${EXPLORER_IP}
 
 volumes:
   grafana-storage:

@@ -25,6 +25,7 @@ from aiohttp import ClientSession, ClientResponseError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import datetime
 from getpass import getpass
+import hashlib
 import logging
 import logging.handlers
 from logging.handlers import RotatingFileHandler
@@ -54,7 +55,7 @@ VERSION = '2.1.0'
 INFLUX_HOST = '192.168.1.169'
 INFLUX_PORT = '8181'  # default port for InfluxDB 3; sfc.py accesses it over HTTPS
 INFLUX_DB = 'sfc'
-INFLUXDB3_AUTH_TOKEN = 'apiv3_...'
+INFLUXDB3_AUTH_TOKEN = None  # Will be loaded from file or environment variable in container environments
 SF_MVIP = '192.168.1.34'
 SF_USERNAME = 'admin'
 SF_PASSWORD = '.....'
@@ -91,9 +92,9 @@ args: Namespace  # Will be set by argparse
 
 # SolidFire headers (Basic Auth - no Authorization key!)
 sf_headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
-# InfluxDB headers (Bearer token)
+# InfluxDB headers (Bearer token will be set after token is loaded)
 influx_headers = {'Accept': 'application/json', 'Accept-Encoding': 'deflate, gzip;q=1.0, *;q=0.5',
-                  'Content-Type': 'application/json', 'Authorization': 'Bearer ' + INFLUXDB3_AUTH_TOKEN}
+                  'Content-Type': 'application/json'}
 
 
 async def sf_api_post(session, url, payload, auth):
@@ -2359,11 +2360,9 @@ if __name__ == '__main__':
         nargs='?',
         const=1,
         type=str,
-        default=os.environ.get(
-            'INFLUXDB3_AUTH_TOKEN',
-            INFLUXDB3_AUTH_TOKEN),
+        default=None,  # No default - will be determined by priority logic
         required=False,
-        help='InfluxDB 3 API authentication token. Default: INFLUXDB3_AUTH_TOKEN environment variable or hardcoded value.')
+        help='InfluxDB 3 API authentication token. Will prioritize token file, then this argument, then environment variable.')
     parser.add_argument(
         '-fh',
         '--frequency-high',
@@ -2491,12 +2490,48 @@ if __name__ == '__main__':
         str(INT_LO_FREQ) +
         ' seconds.')
 
-    # Update global INFLUXDB3_AUTH_TOKEN if provided via argument
-    if args.influxdb_token is not None:
+    # Update global INFLUXDB3_AUTH_TOKEN - prioritize file, then argument, then environment, then error
+    token_file = os.environ.get('INFLUXDB3_AUTH_TOKEN_FILE')
+    
+    # First try to load from token file (container environment)
+    if token_file and os.path.exists(token_file):
+        try:
+            with open(token_file, 'r') as f:
+                file_token = f.read().strip()
+                # Remove any ANSI escape sequences (in case token was generated with colored output)
+                import re
+                file_token = re.sub(r'\x1b\[[0-9;]*m', '', file_token)
+                if file_token:
+                    INFLUXDB3_AUTH_TOKEN = file_token
+                    logging.info(f'Using InfluxDB token loaded from file: {token_file}')
+                else:
+                    logging.warning(f'Token file {token_file} is empty.')
+        except Exception as e:
+            logging.error(f'Failed to read token from file {token_file}: {e}')
+    
+    # Second, try command line argument
+    if INFLUXDB3_AUTH_TOKEN is None and args.influxdb_token is not None:
         INFLUXDB3_AUTH_TOKEN = args.influxdb_token
         logging.info('Using InfluxDB token provided via command line argument.')
-    else:
-        logging.info('Using InfluxDB token from environment variable or hardcoded value.')
+    
+    # Third, try environment variable
+    if INFLUXDB3_AUTH_TOKEN is None:
+        env_token = os.environ.get('INFLUXDB3_AUTH_TOKEN')
+        if env_token:
+            INFLUXDB3_AUTH_TOKEN = env_token
+            logging.info('Using InfluxDB token from INFLUXDB3_AUTH_TOKEN environment variable.')
+    
+    # If still None, error out
+    if INFLUXDB3_AUTH_TOKEN is None:
+        logging.error('No InfluxDB token found! Please provide via file, command line argument, or environment variable.')
+        sys.exit(1)
+    
+    # Log SHA384 hash of the token for debugging (safe to log)
+    token_hash = hashlib.sha384(INFLUXDB3_AUTH_TOKEN.encode('utf-8')).hexdigest()
+    logging.info(f'InfluxDB token SHA384: {token_hash}')
+    
+    # Update influx_headers with the final token value
+    influx_headers['Authorization'] = 'Bearer ' + INFLUXDB3_AUTH_TOKEN
 
     # Update global InfluxDB connection variables from arguments/environment
     if args.influxdb_host is not None:

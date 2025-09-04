@@ -288,9 +288,67 @@ def create_grafana_config():
     return (key_path, cert_path)
 
 
+def create_explorer_config():
+    # Create InfluxDB Explorer CSR, sign it with CA key, copy to ./certs/explorer
+    # NOTE: InfluxDB3 Explorer expects cert.pem and key.pem hardcoded names
+    master = pathlib.Path("./certs/_master")
+    ca_key = master / "ca.key"
+    ca_crt = master / "ca.crt"
+
+    if not (ca_key.exists() and ca_crt.exists()):
+        create_certificates()
+
+    dest = pathlib.Path("./certs/explorer")
+    dest.mkdir(parents=True, exist_ok=True)
+
+    # Generate with expected InfluxDB3 Explorer names
+    key_path = dest / "key.pem"
+    cert_path = dest / "cert.pem"
+    fullchain_path = dest / "fullchain.pem"  # Alternative format for Explorer
+    
+    # If already present, skip
+    if key_path.exists() and cert_path.exists():
+        logging.info("Explorer TLS key and certificate already exist. Skipping generation.")
+        # Still create fullchain.pem if it doesn't exist
+        if not fullchain_path.exists():
+            if ca_crt.exists():
+                # Create fullchain.pem = cert + CA
+                fullchain_content = cert_path.read_text() + "\n" + ca_crt.read_text()
+                fullchain_path.write_text(fullchain_content)
+                logging.info("Created fullchain.pem for Explorer")
+        return (key_path, cert_path)
+
+    # Generate temporary files with standard naming, then rename
+    temp_key, temp_cert = gen_sign_csr(dest, "explorer", "/CN=explorer")
+    
+    # Rename to InfluxDB3 Explorer expected names
+    temp_key.rename(key_path)
+    temp_cert.rename(cert_path)
+    
+    # Create fullchain.pem (cert + CA chain) for Explorer compatibility
+    if ca_crt.exists():
+        fullchain_content = cert_path.read_text() + "\n" + ca_crt.read_text()
+        fullchain_path.write_text(fullchain_content)
+        logging.info("Created fullchain.pem for Explorer")
+
+    conf_path = dest / "explorer_tls.conf"
+    conf_text = (
+        "# Minimal InfluxDB Explorer TLS configuration (example)\n"
+        f"cert_file = {str(cert_path)}\n"
+        f"cert_key = {str(key_path)}\n"
+        f"fullchain_file = {str(fullchain_path)}\n"
+        f"ca_file = {str(dest / 'ca.crt')}\n"
+    )
+    with open(str(conf_path), "w", encoding="utf-8") as fh:
+        fh.write(conf_text)
+
+    logging.info("InfluxDB Explorer TLS material created at %s", str(dest))
+    return (key_path, cert_path)
+
+
 def copy_ca_to_all():
     # Copies CA public key to all services
-    for service in ["s3", "influxdb", "grafana", "sfc", "utils"]:
+    for service in ["s3", "influxdb", "grafana", "sfc", "utils", "explorer"]:
         src = pathlib.Path("./certs/_master/ca.crt")
         dst = pathlib.Path(f"./certs/{service}/ca.crt")
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -301,7 +359,7 @@ def copy_ca_to_all():
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generate CA and per-service TLS certificates.")
-    parser.add_argument("--service", choices=["all", "s3", "influxdb", "grafana", "ca"], default="all", help="Which certs to generate")
+    parser.add_argument("--service", choices=["all", "s3", "influxdb", "grafana", "explorer", "ca"], default="all", help="Which certs to generate")
     args = parser.parse_args()
 
     if args.service == "ca":
@@ -314,10 +372,12 @@ if __name__ == "__main__":
         copy_ca_to_all()
     elif args.service == "grafana":
         create_grafana_config()
+        create_explorer_config()
         copy_ca_to_all()
     else:
         create_certificates()
         create_influxdb_config()
         create_s3_config()
         create_grafana_config()
+        create_explorer_config()
         copy_ca_to_all()

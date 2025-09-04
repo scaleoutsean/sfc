@@ -178,7 +178,7 @@ exec /home/influx/.influxdb/influxdb3 serve \
   --tls-cert="${TLS_CERT}" \
   --tls-minimum-version="${TLS_MIN_VERSION:-tls-1.3}" \
   --http-bind="${HTTP_BIND:-0.0.0.0:8181}" \
-  --wal-flush-interval="${WAL_FLUSH_INTERVAL:-120s}"
-  # --admin-token-recovery-http-bind="0.0.0.0:8182"
+  --wal-flush-interval="${WAL_FLUSH_INTERVAL:-120s}" \
+  --admin-token-recovery-http-bind="0.0.0.0:8182"
 
 
