@@ -2,6 +2,7 @@
 
 - [Dashboards](#dashboards)
   - [Grafana version](#grafana-version)
+    - [Querying InfluxDB 3 from the CLI](#querying-influxdb-3-from-the-cli)
     - [Grafana Data Source](#grafana-data-source)
     - [Aliasing or replacing Grafana's labels](#aliasing-or-replacing-grafanas-labels)
     - [Overcoming long updates of certain measurements](#overcoming-long-updates-of-certain-measurements)
@@ -28,43 +29,71 @@
       - [Schedules (`schedules`)](#schedules-schedules)
       - [Snapshots (`snapshots`)](#snapshots-snapshots)
       - [Snapshot groups (`snapshot_groups`)](#snapshot-groups-snapshot_groups)
-- [List of Influx tables in SFC](#list-of-influx-tables-in-sfc)
-  - [Table: account\_efficiency](#table-account_efficiency)
-  - [Table: accounts](#table-accounts)
-  - [Table: cluster\_capacity](#table-cluster_capacity)
-  - [Table: cluster\_faults](#table-cluster_faults)
-  - [Table: cluster\_performance](#table-cluster_performance)
-  - [Table: cluster\_version](#table-cluster_version)
-  - [Table: drive\_stats](#table-drive_stats)
-  - [Table: node\_performance](#table-node_performance)
-  - [Table: volume\_efficiency](#table-volume_efficiency)
-  - [Table: volume\_performance](#table-volume_performance)
-  - [Table: volumes](#table-volumes)
+  - [List of Influx tables in SFC](#list-of-influx-tables-in-sfc)
+    - [Table: account\_efficiency](#table-account_efficiency)
+    - [Table: accounts](#table-accounts)
+    - [Table: cluster\_capacity](#table-cluster_capacity)
+    - [Table: cluster\_faults](#table-cluster_faults)
+    - [Table: cluster\_performance](#table-cluster_performance)
+    - [Table: cluster\_version](#table-cluster_version)
+    - [Table: drive\_stats](#table-drive_stats)
+    - [Table: node\_performance](#table-node_performance)
+    - [Table: volume\_efficiency](#table-volume_efficiency)
+    - [Table: volume\_performance](#table-volume_performance)
+    - [Table: volumes](#table-volumes)
 
 ## Grafana version
 
-Grafana v12.0 was used in the development of SFC v2.1, but SFC has no dependencies or plugins that depend on Grafana 12 or its plugins.
+Grafana v12.2 was used in the development of SFC v2.1, but SFC has no dependencies or plugins that depend on Grafana 12 or its plugins.
 
-If reference dashboard or queries don't work with latest release of Grafana, please import the dashboard and try different panel settings or queries. 
+If reference dashboard or queries don't work with latest release of Grafana, please import the dashboard and try different panel settings or queries.
+
+### Querying InfluxDB 3 from the CLI
+
+Since InfluxDB is running over HTTPS, you won't be able to connect to it with <https://localhost:8181> as TLS certificate won't match.
+
+Within a container in the same Docker Compose, use InfluxDB service name. Outside, use FQDN or hostname the TLS certificate was issued for. Example:
+
+```sh
+export TOKEN="apiv3_5upbASlk1..."
+export FQDN_SAN="influxdb.corp.com.org"
+influxdb3 query --database sfc 'SELECT name,time FROM volume_performance ORDER BY time DESC LIMIT 3;' -H https://${FQDN_SAN}:8181 --token $TOKEN
+```
+
+From the `utils` container:
+
+```sh
+root@bda9d30b0ef1:/home/influx/.influxdb# pwd
+/home/influx/.influxdb
+root@bda9d30b0ef1:/home/influx/.influxdb# ./influxdb3 show databases -H https://influxdb:8181 \
+  --token apiv3_Ghq --tls-ca /s3_certs/ca.crt 
++---------------+
+| iox::database |
++---------------+
+| _internal     |
+| sfc           |
++---------------+
+```
+
+From the shell using the `utils` container:
+
+```sh
+docker compose exec utils bash -c "source /home/influxdb/setup.sh && influxdb3 query \
+   --database sfc --host https://influxdb:8181 'SELECT * FROM volume_performance LIMIT 5;'"
+```
 
 ### Grafana Data Source
 
-How to create an InfluxDB source in Grafana 12:
+How to create an InfluxDB source in Grafana 12.2:
 
 - Go to `Sources` > `Add data source`
-- Pick `InfluxDB` and `InfluxQL` (unless you prefer `SQL` which I haven't tested)
+- Pick `InfluxDB` and `SQL` query language (unless you prefer `InfluxQL` from InfluxDB v1, which is also available). `SQL` is the new default, so most examples will use that.
 - Give the new source a name such as `sfc` (for SolidFire Collector)
-- `HTTP` > `URL`: if InfluxDB is running on same OS, `https://localhost:8181`, if in Kubernetes or Docker Compose you may use `https://influxdb:8181`, if elsewhere then maybe `https://FQDN` or `https://some.host.com.org:58086`, etc. You *may* fall back to HTTP, and disable TLS validation if using a "snake oil" TLS certificate, but then sfc.py also has to be changed to use HTTP.
-- You must get API token and configure Headers
-- Scroll all the way to the bottom, click `Save & Test`
+- `HTTP` > `URL`: if InfluxDB is running on same OS, `https://hostname:8181`, if in Kubernetes or Docker Compose, you may use `https://influxdb:8181`, if elsewhere, then maybe `https://FQDN` or `https://some.host.com.org:58086`, etc.
+- You must get a user-level API token from InfluxDB and paste that in Token (4)
+- Find and click `Save & Test`
 
-Top of the page:
-
-![InfluxDB data source setup screen 1](../images/grafana-12-with-influxdb-3-data-source-01.png)
-
-Bottom:
-
-![InfluxDB data source setup screen 2](../images/grafana-12-with-influxdb-3-data-source-02.png)
+![InfluxDB data source setup screen 1](../images/sfc-grafana-data-source-influxdb3-sql.png)
 
 ### Aliasing or replacing Grafana's labels
 
@@ -74,7 +103,7 @@ Personally I find the difficulty of aliasing data in labels the worst. Below in 
 
 ### Overcoming long updates of certain measurements
 
-As explained elsewhere, SFC uses three schedules for high, medium and low-frequency of data collection. 
+As explained elsewhere, SFC uses three schedules for high, medium and low-frequency of data collection.
 
 - First, the idea is that one is *unlikely* to have high- and low-frequency metrics in the same dashboard, but if they do, then they won't need to zoom to less than 15-60 minute windows
 - Second, most users who do need to zoom to 1-15 minute segments will want to do that only for a subset of data and a best practice for this is to not have all panels zoomable to that level
@@ -88,7 +117,7 @@ Of course, nothing prevents you from having everything in one dashboard, but wha
 
 - Go to your SFC dashboard's Settings
 - Scroll down to `Time options` > `Auto refresh` and enter a list of higher-duration values such as `30m,1h,2h,4h,8h,12h,1d,7d,28d`
-- Just below, optionally enable `Hide time picker` 
+- Just below, optionally enable `Hide time picker`
 - Save your "slow" dashboard using a pre-set time-range set to reasonable value:
   - Select reasonable time range (e.g. 2 days) for your users
   - Click on the little floppy disk icon to save your slow dashboard and select `Save current time range as dashboard default`
@@ -128,7 +157,7 @@ As you will notice later, not all measurements are conductive to easy visualizat
 
 ### Notes
 
-Some queries here and also in reference [dashboard.json](./dashboard.json) have an unnecessary `alias` or other setting in them. That doesn't mean it should be used or that I recommend it - it may be junk from my testing. 
+Some queries here and also in reference [dashboard.json](./dashboard.json) have an unnecessary `alias` or other setting in them. That doesn't mean it should be used or that I recommend it - it may be junk from my testing.
 
 Some queries are set to use `last`, others `mean`. In some cases `last` is used because that's what I wanted while working on SFC. For example, in cluster faults I don't want `mean` of 0s (no problem) and 1s (unresolved fault). Where `mean` is used it may be only because that's what Grafana does by default. In other cases maybe I have `last` simply because I wanted to see if the code was working properly, but normally I'd use `mean`. And finally, there may be cases where you'd want something different, so feel free to modify any and all queries to suit your needs.
 
@@ -138,7 +167,20 @@ Reference dashboard contains all queries mentioned below, so you don't need to c
 
 ### Account efficiency (`account_efficiency`)
 
-Storage efficiency is pre-created and we can get account-level storage efficiency (product of compression and deduplication for all volumes owned by a tenant) with this SQL query.
+Storage efficiency is pre-created and we can get account-level storage efficiency (product of compression and de-duplication for all volumes owned by a tenant) with this **SQL** query.
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  name,
+  AVG(storage_efficiency) AS mean_storage_efficiency
+FROM account_efficiency 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, name
+ORDER BY time_bucket
+```
+
+InfluxQL:
 
 ```sql
 SELECT mean("storage_efficiency") FROM "account_efficiency" 
@@ -146,6 +188,22 @@ SELECT mean("storage_efficiency") FROM "account_efficiency"
 ```
 
 If you were you select two values - `compression` and `deduplication` - and use Stat, Grafana may show nonsense metric labels.
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  id,
+  AVG(compression) AS mean_compression,
+  AVG(deduplication) AS mean_deduplication
+FROM account_efficiency 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, id
+ORDER BY time_bucket
+```
+
+- InfluxQL:
 
 ```sql
 SELECT mean("compression"), mean("deduplication") 
@@ -157,23 +215,47 @@ SELECT mean("compression"), mean("deduplication")
 - The above will make Stat show junk like `account_efficiency.mean { id: 1 }` above each metric
 - What you *want* to see is `1` (i.e. just the account ID)
   - In SQL query area go to `Transform data` tab, add `Rename fields by regex` transformation and then
-  - Match: `account_efficiency.mean { id: (.*) }` 
+  - Match: `account_efficiency.mean { id: (.*) }`
   - Replace with: `Account ID $1`
 
-
 "Group by" can also use (account) name, in which case the above would still work, just use `{ name: (.*) }` instead of ID-based search in regex transformation.
+
+- SQL:
 
 ```sql
 SELECT mean("compression"), mean("deduplication") 
   FROM "account_efficiency" 
-  WHERE $timeFilter 
+  WHERE $timeFilter
+  GROUP BY time($__interval), "name"::tag fill(null)
+```
+
+- InfluxQL:
+
+```sql
+SELECT mean("compression"), mean("deduplication") 
+  FROM "account_efficiency" 
+  WHERE $timeFilter
   GROUP BY time($__interval), "name"::tag fill(null)
 ```
 
 ![Account storage efficiency](../images/sfc-example-dashboard-01-account-storage-efficiency.png)
 
-
 ### Accounts (`accounts`)
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  name,
+  AVG(volume_count) AS mean_volume_count
+FROM accounts 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, name
+ORDER BY time_bucket
+```
+
+- InfluxQL:
 
 ```sql
 SELECT mean("volume_count") FROM "accounts" 
@@ -181,13 +263,30 @@ SELECT mean("volume_count") FROM "accounts"
   GROUP BY time($__interval), "name"::tag fill(null)
 ```
 
-These have just few basic properties of storage accounts (tenants). 
+These have just few basic properties of storage accounts (tenants).
 
 The above example shows volume count by tenant, which may be useful if you are in an environment where volume count or connection count is close to the SolidFire maximums. You may have 10 Kubernetes clusters, for example, where each instance of Trident uses a separate account and has 200-300 volumes.
 
 ![Account storage efficiency](../images/sfc-example-dashboard-02-account-volumes-per-tenant.png)
 
 If you want to produce a simple "table"-like list of your accounts, consider using Bar Gauge with this query:
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  name,
+  id,
+  LAST_VALUE(volume_count) AS last_volume_count
+FROM accounts 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, name, id
+ORDER BY time_bucket DESC
+LIMIT 1
+```
+
+- InfluxQL:
 
 ```sql
 SELECT last("volume_count") FROM "accounts" 
@@ -206,6 +305,20 @@ This screenshot is large, but in my dashboard the panel is very small. When I sh
 
 Almost all useful details from SolidFire's GetClusterCapacity are passed to InfluxDB.
 
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  AVG(active_sessions) AS mean_active_sessions
+FROM cluster_capacity 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket
+ORDER BY time_bucket
+```
+
+- InfluxQL:
+
 ```sql
 SELECT mean("active_sessions") FROM "cluster_capacity" 
   WHERE $timeFilter 
@@ -214,8 +327,21 @@ SELECT mean("active_sessions") FROM "cluster_capacity"
 
 ![Cluster capacity - recent IO size](../images/sfc-example-dashboard-03-cluster-capacity-recent-io-size.png)
 
-
 ### Cluster faults (`cluster_faults`)
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  AVG(warning) AS mean_warning
+FROM cluster_faults 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket
+ORDER BY time_bucket
+```
+
+- InfluxQL:
 
 ```sql
 SELECT mean("warning") FROM "cluster_faults" 
@@ -224,6 +350,8 @@ SELECT mean("warning") FROM "cluster_faults"
 ```
 
 You may create one panel that gets of those and groups them, or create several panels (one for each level).
+
+- InfluxQL:
 
 ```sql
 # query A 
@@ -240,10 +368,23 @@ That should show something like this:
 
 ![Cluster faults](../images/sfc-example-dashboard-05-cluster-faults.png)
 
-
 ### Cluster performance (`cluster_performance`)
 
 The SolidFire API method calls these "cluster stats". I call them cluster performance.
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  AVG(normalized_iops) AS mean_normalized_iops
+FROM cluster_performance 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket
+ORDER BY time_bucket
+```
+
+- InfluxQL:
 
 ```sql
 SELECT mean("normalized_iops") FROM "cluster_performance" 
@@ -257,10 +398,9 @@ As you can see here, there's nothing going on in my environment and I didn't eve
 
 ![Cluster performance - normalized IOPS](../images/sfc-example-dashboard-06-cluster-performance.png)
 
-
 ### Cluster version (`cluster_version`)
 
-This is a simple one, just to keep an eye on the API and software version and also the cluster name (`PROD`, below). That's important for multi-cluster environments and/or if you collect data from multiple clusters into the same InfluxDB.
+This is a simple one, just to keep an eye on the API and software version and also the cluster name (`PROD`, below). That's important for multi-cluster environments and/or if you collect data from multiple clusters into the same InfluxDB. This is the same for SQL and InfluxQL:
 
 ```sql
 > select * from cluster_version
@@ -270,14 +410,13 @@ time                 api_version name version
 2024-05-26T10:27:06Z 12.5        PROD 12.5.0.897
 ```
 
-This I don't visualize, as it's not necessary for people with one cluster (not to mention SolidFire has been end-of-sale'd so it's not like anyone will fall behind when it comes to software updates). The purpose of collecting this measurement is to get the cluster name (`PROD` in my case) which is inserted into other measurements. 
+This I don't visualize, as it's not necessary for people with one cluster (not to mention SolidFire has been end-of-sale'd so it's not like anyone will fall behind when it comes to software updates). The purpose of collecting this measurement is to get the cluster name (`PROD` in my case) which is inserted into other measurements.
 
 People who have a bunch of clusters and are slow to update may want to gather these, but by now I assume everyone is on latest version because updates are rare.
 
-
 ### Drive stats (`drive_stats`)
 
-I develop SFC on SolidFire Demo VM so I can't produce meaningful drive statistics, but here's what's collected:
+I develop SFC on SolidFire Demo VM so I can't produce meaningful drive statistics, but here's what's collected (SQL and InfluxQL):
 
 ```sql
 > select * from drive_stats
@@ -296,10 +435,23 @@ One can't get meaningful lifeRemainingPercent and powerOnHours in a VM so I won'
 
 Note that lifeRemainingPercent really means (100-lifeRemainingPercent), i.e. it means the opposite from what it says. 15 means 85% remains. I didn't want to transform this value to (100-lifeRemainingPercent) in order to avoid confusion - the figure here is the same (misleading) number that you get from the SolidFire API.
 
-
 ### Node performance (`node_performance`)
 
 You may find these in the API as "node stats".
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  AVG(cpu) AS mean_cpu
+FROM node_performance 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket
+ORDER BY time_bucket
+```
+
+- InfluxQL:
 
 ```sql
 SELECT mean("cpu") FROM "node_performance" 
@@ -312,13 +464,27 @@ I guess nodes' stats may be mildly useful if suspecting major imbalance in volum
 ![Node performance - CPU utilization](../images/sfc-example-dashboard-07-node-performance-cpu-utilization.png)
 
 Most of the stuff in the API response isn't useful so in addition to CPU, only two other metrics are collected:
+
 - networkUtilizationCluster
 - networkUtilizationStorage
 
 File an issue if you need more and I'll see what I can do. Or submit a pull request.
 
-
 ### iSCSI connections (`iscsi_sessions`)
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  AVG(ms_since_last_scsi_command) AS mean_ms_since_last_scsi_command
+FROM iscsi_sessions 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket
+ORDER BY time_bucket
+```
+
+- InfluxQL:
 
 ```sql
 SELECT mean("ms_since_last_scsi_command") FROM "iscsi_sessions" 
@@ -336,13 +502,28 @@ If there are no iSCSI connections, the table aka "measurement" will not be creat
 
 ### Sync jobs (`sync_jobs`)
 
-This one is "special". 
+This one is "special".
 
 First, SFC currently parses only one type of SolidFire sync job, remote sync used for initial replication (and re-sync).
 
 Second, in my observation you can view these only on the cluster where replication is *in*-bound. If you have replication flowing in one direction, I think you can get these details only at the destination.
 
 Below `cluster::tag = 'DR'` is for that. Use the right name of the cluster that is a destination (of volume replication).
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  dst_volume_id,
+  LAST_VALUE(remaining_time) AS last_remaining_time
+FROM sync_jobs
+WHERE cluster = 'DR' AND time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, dst_volume_id
+ORDER BY time_bucket DESC
+```
+
+- InfluxQL:
 
 ```sql
 SELECT last("remaining_time") FROM "sync_jobs"
@@ -374,6 +555,22 @@ Fifth, the example above is for "time remaining". You may select other fields wh
 
 Here I simply select all three efficiency-related properties and visualize them using Stat.
 
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  id,
+  AVG(compression) AS mean_compression,
+  AVG(deduplication) AS mean_deduplication
+FROM volume_efficiency 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, id
+ORDER BY time_bucket
+```
+
+- InfluxQL:
+
 ```sql
 SELECT mean("compression"), mean("deduplication") 
   FROM "volume_efficiency" 
@@ -381,9 +578,24 @@ SELECT mean("compression"), mean("deduplication")
   GROUP BY time($__interval), "id"::tag fill(null)
 ```
 
-Volume compression multiplied by volume deduplication give us what's commonly known as "storage efficiency factor". (Most people don't consider Thin Provisioning to be part of this). 
+Volume compression multiplied by volume deduplication give us what's commonly known as "storage efficiency factor". (Most people don't consider Thin Provisioning to be part of this).
 
 While that can be done in Grafana, this metric is generated by SFC and while not present in the API it is available in this measurement, so if you want to get that without fiddling with Grafana you can query it.
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  id,
+  AVG(storage_efficiency) AS mean_storage_efficiency
+FROM volume_efficiency 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, id
+ORDER BY time_bucket
+```
+
+- InfluxQL:
 
 ```sql
 SELECT mean("storage_efficiency") 
@@ -400,6 +612,21 @@ These container volume properties including volume names. Other metrics may have
 
 Here's a less common example - a query for a Stat visualization for QoS policy IDs:
 
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  name,
+  AVG(qos_policy_id) AS mean_qos_policy_id
+FROM volumes 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, name
+ORDER BY time_bucket
+```
+
+- InfluxQL:
+
 ```sql
 SELECT mean("qos_policy_id") FROM "volumes" 
   WHERE $timeFilter 
@@ -415,6 +642,21 @@ Another use case is in multi-cluster scenarios where you may want to apply setti
 Basic volume pairing information is collected as well. By basic I mean that only the first pairing is analyzed, and not all details are included to avoid problems with parsing and typing. Most users don't have more than one pairing per volume and three clusters would be required to try and test, so the number of monitored relationships (which is one) per volume is unlikely to grow.
 
 Field/tag assignment may change if necessary, but at least initially this is one example of how to use it.
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  name,
+  LAST_VALUE(remote_replication_mode) AS last_remote_replication_mode
+FROM volumes 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, name
+ORDER BY time_bucket DESC
+```
+
+- InfluxQL:
 
 ```sql
 SELECT last("remote_replication_mode") FROM "volumes" 
@@ -436,7 +678,18 @@ For the monitoring of initial replication sync ("baseline copy") we need to [use
 
 SFC also collects volume attributes set by Trident CSI. Note that other attributes (those that may be set by non-Trident CSI) are ignored, mostly because I haven't yet thought about how to handle them and estimate their impact on InfluxDB.
 
-The following InfluxQL query shows recent volume ID, size and name of PVCs created by Trident v24.06.0.
+The following query shows recent volume ID, size and name of PVCs created by Trident v24.06.0.
+
+- SQL:
+
+```sql
+SELECT id, total_size, va_docker_name, va_fstype, va_trident_version, va_trident_backend_uuid 
+FROM volumes 
+WHERE va_trident_version = '24.06.0' AND time > now() - INTERVAL '10 minutes'
+ORDER BY time DESC
+```
+
+- InfluxQL:
 
 ```sql
 > SELECT id,total_size,va_docker_name,va_fstype,va_trident_version,va_trident_backend_uuid FROM volumes WHERE va_trident_version='24.06.0' AND time > (now()-10m)
@@ -447,7 +700,7 @@ time                 id  total_size va_docker_name                           va_
 2024-07-03T07:51:35Z 178 2147483648 pvc-cea17a61-0017-4bd5-9623-0b2303d89630 raw       24.06.0            8957837e-6a62-4f19-b158-2bb7cd143d93
 ```
 
-These values are all strings, so I'm not sure how they can be made useful in Grafana dashboards. 
+These values are all strings, so I'm not sure how they can be made useful in Grafana dashboards.
 
 While they can be visualized in log-style Grafana panels, that doesn't seem particularly useful and for now the reference dashboard does not include any examples. If anyone has an idea of how to improve the format or field/tag assignment without bloating the measurement in terms of series cardinality and such, suggestions are welcome (use Issues).
 
@@ -457,6 +710,21 @@ Volume attributes are expected to be useful in lookup and reporting of Trident C
 
 Volume performance metrics are what you'd expect. The API calls them volume stats.
 
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  name,
+  AVG(actual_iops) AS mean_actual_iops
+FROM volume_performance 
+WHERE name = 'data' AND time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, name
+ORDER BY time_bucket
+```
+
+- InfluxQL:
+
 ```sql
 SELECT mean("actual_iops") FROM "volume_performance" 
   WHERE ("name"::tag = 'data') AND $timeFilter 
@@ -464,6 +732,23 @@ SELECT mean("actual_iops") FROM "volume_performance"
 ```
 
 This is like in the SolidFire API response, but with volume names added. Personally I prefer to pick a handful volumes - for which I usually know the ID - and just watch these few in a panel named after my important application.
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  id,
+  name,
+  AVG(average_io_size) AS mean_average_io_size,
+  AVG(actual_iops) AS mean_actual_iops
+FROM volume_performance 
+WHERE id = '134' AND time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, id, name
+ORDER BY time_bucket
+```
+
+- InfluxQL:
 
 ```sql
 SELECT mean("average_io_size"), mean("actual_iops") 
@@ -478,9 +763,24 @@ This example shows stats for volume ID 134 (mostly idle, except for when I start
 
 Query I use in a Bar Gauge visualization:
 
+- SQL:
+
 ```sql
-SELECT mean("burst_io_credit") FROM "volume_performance" 
-  WHERE $timeFilter 
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  name,
+  AVG(burst_io_credit) AS mean_burst_io_credit
+FROM volume_performance 
+WHERE time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, name
+ORDER BY time_bucket
+```
+
+- InfluxQL:
+
+```sql
+SELECT mean("burst_io_credit") FROM "volume_performance"
+  WHERE $timeFilter
   GROUP BY time($__interval), "name"::tag fill(null)
 ```
 
@@ -490,7 +790,7 @@ It shows how much burst credit each volume has.
 
 If burst credit is needed by some critical application, it may be wise to tighten MaxIOPS on volumes which don't need a lot of burst credits. That way when a volume does burst, it eliminates the risk of having some random app also burst and take away from what's actually available in terms of burst-able IOPS on the node.
 
-Finally, remember that burst credits on a volume are accumulated when iSCSI client doesn't consume Max IOPS. That is, consuming 900 IOPS on a volume with the QoS set to (50,1000,2000) means in 90 seconds the client will accumulate 90 x (1000-900) = 9,000 Burst IOPS (in 4 KiB requests). 
+Finally, remember that burst credits on a volume are accumulated when iSCSI client doesn't consume Max IOPS. That is, consuming 900 IOPS on a volume with the QoS set to (50,1000,2000) means in 90 seconds the client will accumulate 90 x (1000-900) = 9,000 Burst IOPS (in 4 KiB requests).
 
 If a Web server rotates logs when they reach 100 MiB and compresses those by writing them out in 1 MiB requests, 9,000 in 4 KiB may [translate](https://docs.netapp.com/us-en/element-software/concepts/concept_data_manage_volumes_solidfire_quality_of_service.html#qos-performance) to a fraction of that value (let's say 2%, which is 180, enough for 180 x 1MiB requests) which in turn means this burst budget is enough to read a 100 MiB log file (access.log.1) and gzip it to disk as a 35 MB access.log.gz without getting throttled. You can also find appropriate values experimentally by looking at volume utilization percentage or one of the QoS histograms.
 
@@ -498,13 +798,28 @@ Huge burst credit on a volume may mean the volume MaxIOPS setting is too generou
 
 Volume async replication delay is a property in volume performance measurement. It exists *only* for volumes that are in async replication mode and it's shown only for the source, not the target, volume.
 
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  name,
+  LAST_VALUE(async_delay) AS last_async_delay
+FROM volume_performance 
+WHERE async_delay > -1 AND time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, name
+ORDER BY time_bucket DESC
+```
+
+- InfluxQL:
+
 ```sql
 SELECT last("async_delay") FROM "volume_performance" 
   WHERE ("async_delay"::field > -1) AND $timeFilter 
   GROUP BY time($interval), "name"::tag
 ```
 
-Stat panels work well for this, but we can also watch async delay over time. 
+Stat panels work well for this, but we can also watch async delay over time.
 
 Where 0 is used (e.g. async delay) is 0 seconds. To avoid confusion with volumes that aren't even a source of replication, all non-replicating volumes get `-1` here, so just eliminate such volumes from panels when working in Grafana.
 
@@ -512,14 +827,13 @@ Where 0 is used (e.g. async delay) is 0 seconds. To avoid confusion with volumes
 
 Note that replicated snapshots, which are asynchronously replicated as well, are their own "feature" and you can't see snapshot replication delay in volume performance metrics. See [Snapshots](#snapshots-snapshots).
 
-
 ### Data and queries for experimental measurements
 
 While the details of all measurements are subject to change, these are more likely to be changed in terms of what's collected, what gets stored, and what's a tag vs. a field.
 
 #### QoS Histograms (`histogram_*`)
 
-QoS histograms are *not* collected by default. You may enable QoS histogram collection with a switch (`sfc.py -h`). 
+QoS histograms are *not* collected by default. You may enable QoS histogram collection with a switch (`sfc.py -h`).
 
 - histogram_below_min_iops_percentages
 - histogram_min_to_max_iops_percentages
@@ -528,13 +842,34 @@ QoS histograms are *not* collected by default. You may enable QoS histogram coll
 - histogram_throttle_percentages
 - histogram_write_block_sizes
 
-These metrics correspond to the names from the SolidFire API, so you can refer to the SolidFire documentation. 
+These metrics correspond to the names from the SolidFire API, so you can refer to the SolidFire documentation.
 
 SFC changes names of histogram buckets to be Grafana-friendly, but it's easy to tell which SFC bucket name corresponds to the original bucket name from the original histogram object.
 
 I've tried hard to find a way to use this information, and haven't been successful so far. Histograms are by default disabled as I'm not certain of their usefulness, but you may enable them from the CLI (`-h`) and try to figure them out (histogram_below_min_iops_percentages and histogram_min_to_max_iops_percentages).
 
 Write block sizes visualized using Time Series:
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  id,
+  AVG(b_000512_to_004095) AS avg_b_000512_to_004095,
+  AVG(b_004096_to_008191) AS avg_b_004096_to_008191,
+  AVG(b_008192_to_016383) AS avg_b_008192_to_016383,
+  AVG(b_016384_to_032767) AS avg_b_016384_to_032767,
+  AVG(b_032768_to_65535) AS avg_b_032768_to_65535,
+  AVG(b_065536_to_131071) AS avg_b_065536_to_131071,
+  AVG(b_131072_plus) AS avg_b_131072_plus
+FROM histogram_write_block_sizes 
+WHERE id = '134' AND time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, id
+ORDER BY time_bucket
+```
+
+- InfluxQL:
 
 ```sql
 SELECT "b_000512_to_004095", "b_004096_to_008191", "b_008192_to_016383", "b_016384_to_032767", "b_032768_to_65535", "b_065536_to_131071", "b_131072_plus" 
@@ -548,6 +883,25 @@ SELECT "b_000512_to_004095", "b_004096_to_008191", "b_008192_to_016383", "b_0163
 You can't see much unless you hover over the graph and then you'd see data points broken down by request size (0.5 to 4 KiB, 4-8 KiB, etc.). But you can see that one band or bucket (shown in yellow) occupies almost 50% of all IO. That's 4-8 KiB requests, and this client is (an idle) MS SQL Server 2022.
 
 This example is for Heatmap from the same QoS histogram.
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  id,
+  LAST_VALUE(b_01_to_19) AS last_b_01_to_19,
+  LAST_VALUE(b_20_to_39) AS last_b_20_to_39,
+  LAST_VALUE(b_40_to_59) AS last_b_40_to_59,
+  LAST_VALUE(b_60_to_79) AS last_b_60_to_79,
+  LAST_VALUE(b_80_to_100) AS last_b_80_to_100
+FROM histogram_below_min_iops_percentages 
+WHERE id = '134' AND time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, id
+ORDER BY time_bucket
+```
+
+- InfluxQL:
 
 ```sql
 SELECT last("b_01_to_19") 
@@ -563,7 +917,6 @@ SELECT last("b_01_to_19")
 This is why I consider QoS Histograms experimental - until I understand what this below means, I see no point in collecting that data and wasting disk space. Deep-colored vertical orange bars mean most counts were low percentage numbers. But does that mean that most time was spent between Min and Max (histogram_min_to_max_iops_percentages) or that within time spent below Min IOPS, most of it was 01-19% of Min IOPS? I don't know.
 
 ![Volume QoS Histogram - write block size for a volume](../images/sfc-example-dashboard-09-volume-qos-histograms-time-below-min-iops.png)
-
 
 #### Schedules (`schedules`)
 
@@ -593,7 +946,7 @@ My guess is schedules don't change often, so the cost of having this information
 
 #### Snapshots (`snapshots`)
 
-The main problem with snapshots is this: imagine a small cluster with 4 nodes and 400 volumes per node, each with 32 snapshots. That's up to 51,200 entries per each collection run. 
+The main problem with snapshots is this: imagine a small cluster with 4 nodes and 400 volumes per node, each with 32 snapshots. That's up to 51,200 entries per each collection run.
 
 Then there are other problems (such as which of the many details to keep and how, etc.).
 
@@ -621,7 +974,7 @@ In Grafana, if you select the `snapshot_id` field, these change all the time, so
 
 There are plenty of dates in the API response (create, expiration time) but I hesitate to collect those not knowing if there's a use case for that. It could be a lot of data (each volume may have 32 snapshots so with 1,00 volumes there may be 32,000 lines for each run), so I don't collect any of those dates until there's a use case for each additional tag or field.
 
-I haven't tried that, but it may be interesting to visualize `snapshot_id` growth differential (vs 24 hours ago) by volume ID. So if today you see that the number is 24 for volume ID 134 (i.e. 24 new snapshots have been replicated) and 0 for volume ID 135, you know those have failed to replicate or someone has paused or disabled that in snapshot schedule. 
+I haven't tried that, but it may be interesting to visualize `snapshot_id` growth differential (vs 24 hours ago) by volume ID. So if today you see that the number is 24 for volume ID 134 (i.e. 24 new snapshots have been replicated) and 0 for volume ID 135, you know those have failed to replicate or someone has paused or disabled that in snapshot schedule.
 
 Data point examples: the Velero volume is a local snapshot (remote replication not enabled, *and* remote status is 0, so not replicated either). Group ID is 0, so that one isn't a part of a group. The second volume is part of `group-sql-snapshot`, is enabled for remote replication and there's a copy at the remote site (as expected, `volume_pair_uuid` shows this volume is paired, which is required in replication). (Both snapshots are of the same volume (sqldb), which is confusing but I was experimenting with Velero when I took it.)
 
@@ -635,7 +988,24 @@ time                 cluster enable_remote_replication group_id new_snapshot_nam
 
 ```
 
-The best I could do in Grafana:
+Best I could do in Grafana:
+
+- SQL:
+
+```sql
+SELECT 
+  date_trunc('minute', time) AS time_bucket,
+  volume_name,
+  COUNT(DISTINCT volume_id) AS distinct_volume_count
+FROM snapshots 
+WHERE enable_remote_replication = '1' 
+  AND remote_status = '1' 
+  AND time >= $__timeFrom AND time <= $__timeTo
+GROUP BY time_bucket, volume_name
+ORDER BY time_bucket
+```
+
+- InfluxQL:
 
 ```sql
 SELECT distinct("volume_id") FROM "snapshots" 
@@ -668,13 +1038,12 @@ time                 cluster create_time enable_remote_replication expiration_ti
 2024-07-04T10:02:53Z PROD    1720022400  1                         90000           133             133               group-sql-snapshot 3       1                 1
 ```
 
-# List of Influx tables in SFC
+## List of Influx tables in SFC
 
 - Quite a few camel-cased keys that should be changed, but this is how it is now.
 - Some tables may not be shown here due to certain features not being used (e.g. replication, (snapshot) schedules). You may find them in sfc.py or list the tables by yourself if they get populated by your SFC instance that uses them.
 
-## Table: account_efficiency
-
+### Table: account_efficiency
 
 Query: SHOW FIELD KEYS FROM account_efficiency
 
@@ -702,8 +1071,8 @@ Query: SHOW TAG KEYS FROM account_efficiency
 +--------------------+---------+
 
 ```
-## Table: accounts
 
+### Table: accounts
 
 Query: SHOW FIELD KEYS FROM accounts
 
@@ -729,8 +1098,8 @@ Query: SHOW TAG KEYS FROM accounts
 +------------------+---------+
 
 ```
-## Table: cluster_capacity
 
+### Table: cluster_capacity
 
 Query: SHOW FIELD KEYS FROM cluster_capacity
 
@@ -778,8 +1147,8 @@ Query: SHOW TAG KEYS FROM cluster_capacity
 +------------------+--------+
 
 ```
-## Table: cluster_faults
 
+### Table: cluster_faults
 
 Query: SHOW FIELD KEYS FROM cluster_faults
 
@@ -806,8 +1175,8 @@ Query: SHOW TAG KEYS FROM cluster_faults
 +------------------+---------+
 
 ```
-## Table: cluster_performance
 
+### Table: cluster_performance
 
 Query: SHOW FIELD KEYS FROM cluster_performance
 
@@ -841,8 +1210,8 @@ Query: SHOW TAG KEYS FROM cluster_performance
 +---------------------+--------+
 
 ```
-## Table: cluster_version
 
+### Table: cluster_version
 
 Query: SHOW FIELD KEYS FROM cluster_version
 
@@ -866,8 +1235,8 @@ Query: SHOW TAG KEYS FROM cluster_version
 +------------------+---------+
 
 ```
-## Table: drive_stats
 
+### Table: drive_stats
 
 Query: SHOW FIELD KEYS FROM drive_stats
 
@@ -909,7 +1278,6 @@ Query: SHOW TAG KEYS FROM iscsi_sessions
 
 ```
 
-
 Query: SHOW TAG KEYS FROM drive_stats
 
 ```raw
@@ -921,8 +1289,8 @@ Query: SHOW TAG KEYS FROM drive_stats
 +------------------+---------+
 
 ```
-## Table: node_performance
 
+### Table: node_performance
 
 Query: SHOW FIELD KEYS FROM node_performance
 
@@ -948,8 +1316,8 @@ Query: SHOW TAG KEYS FROM node_performance
 +------------------+---------+
 
 ```
-## Table: volume_efficiency
 
+### Table: volume_efficiency
 
 Query: SHOW FIELD KEYS FROM volume_efficiency
 
@@ -977,8 +1345,8 @@ Query: SHOW TAG KEYS FROM volume_efficiency
 +-------------------+---------+
 
 ```
-## Table: volume_performance
 
+### Table: volume_performance
 
 Query: SHOW FIELD KEYS FROM volume_performance
 
@@ -1022,8 +1390,8 @@ Query: SHOW TAG KEYS FROM volume_performance
 +--------------------+---------+
 
 ```
-## Table: volumes
 
+### Table: volumes
 
 Query: SHOW FIELD KEYS FROM volumes
 
@@ -1072,4 +1440,3 @@ Query: SHOW TAG KEYS FROM volumes
 +------------------+--------------------+
 
 ```
-

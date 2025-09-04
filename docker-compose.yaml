@@ -1,0 +1,153 @@
+services:
+  s3:
+    image: versitys3gw:${VERSITY_S3GW_VERSION}
+    build:
+      context: s3
+      dockerfile: Dockerfile
+      args:
+        VERSITY_VERSION: ${VERSITY_S3GW_VERSION}
+    container_name: s3
+    restart: unless-stopped
+    volumes:
+      - ./certs/s3:/certs:ro
+      - ./data/s3:/data
+      - ./certs/_master/ca.crt:/certs/ca.crt:ro
+    ports:
+      - "${S3_PORT}:7070"
+    environment:
+      ROOT_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      ROOT_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      VGW_CERT: /certs/s3.crt
+      VGW_KEY: /certs/s3.key
+      VGW_PORT: "7070"
+      VGW_IP: 0.0.0.0
+      VGW_DATA_DIR: /data
+      VGW_CHOWN_UID: 1000
+      VGW_CHOWN_GID: 1000
+      DEBUG: "false"
+    networks:
+      sfc:
+        ipv4_address: ${S3_IP}
+
+  influxdb:
+    container_name: influxdb3-core
+    image: influxdb:${INFLUXDB3_VERSION}
+    build:
+      context: influxdb
+      dockerfile: Dockerfile
+    ports:
+      - "${INFLUXDB_PORT}:8181"
+    environment:
+      S3_ENDPOINT: https://s3:7070
+      TLS_KEY: /home/influxdb3/certs/influxdb.key
+      TLS_CERT: /home/influxdb3/certs/influxdb.crt
+      TLS_MIN_VERSION: tls-1.3
+      INFLUXDB3_TLS_CA: /home/influxdb3/certs/ca.crt
+      TLS_CA: /home/influxdb3/certs/ca.crt
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      S3_CREDENTIALS_FILE: /influxdb_credentials/credentials
+      NODE_ID: ${INFLUXDB_NODE_ID}
+      BUCKET: ${S3_BUCKET}
+      INFLUXDB3_ADMIN_TOKEN: ${INFLUXDB_ADMIN_TOKEN}
+      TOKEN_FILE: /influxdb_tokens/sfc.token
+    volumes:
+      - ./data/influxdb:/var/lib/influxdb3
+      - ./data/influxdb_credentials/credentials:/influxdb_credentials/credentials:ro
+      - ./certs/influxdb:/home/influxdb3/certs:ro
+      - ./data/influxdb_tokens:/influxdb_tokens
+      - ./certs/_master/ca.crt:/home/influxdb3/certs/ca.crt:ro
+    depends_on:
+      - s3
+    entrypoint: ["/home/influx/influxdb3-entrypoint.sh"]
+    command: []
+    networks:
+      sfc:
+        ipv4_address: ${INFLUXDB_IP}
+
+  sfc:
+    build:
+      context: sfc
+      dockerfile: Dockerfile
+    container_name: sfc
+    environment:
+      INFLUX_HOST: influxdb
+      INFLUX_PORT: ${INFLUXDB_PORT}
+      INFLUX_DB: ${INFLUXDB_DB}
+      INFLUXDB3_AUTH_TOKEN_FILE: /influxdb_tokens/sfc.token
+      INFLUXDB3_TLS_CA: /home/sfcuser/sfc_certs/ca.crt
+      CA_CHAIN: /home/sfcuser/sfc_certs/sf_ca.crt,/home/sfcuser/sfc_certs/influxdb_ca.crt
+      INT_HI_FREQ: ${SFC_HI_FREQ}
+      INT_MED_FREQ: ${SFC_MED_FREQ}
+      INT_LO_FREQ: ${SFC_LO_FREQ}
+      SF_MVIP: ${SF_MVIP}
+      SF_USERNAME: ${SF_USERNAME}
+      SF_PASSWORD: ${SF_PASSWORD}
+    depends_on:
+      - influxdb
+    volumes:
+      - ./certs/sfc:/home/sfcuser/sfc_certs:ro
+      - ./data/influxdb_tokens:/influxdb_tokens:ro
+      - ./certs/_master/ca.crt:/home/sfcuser/sfc_certs/ca.crt:ro
+    networks:
+      sfc:
+        ipv4_address: ${SFC_IP}
+
+  utils:
+    build:
+      context: ./utils-container
+    container_name: utils
+    restart: "no"
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      S3_ENDPOINT: https://s3:7070
+      BUCKET: ${S3_BUCKET}
+      CRED_DIR: /influxdb_credentials
+      # InfluxDB3 Environment Variables
+      INFLUX_HOST: influxdb
+      INFLUX_PORT: ${INFLUXDB_PORT}
+      INFLUX_DB: ${INFLUXDB_DB}
+      INFLUXDB3_TLS_CA: /influxdb_certs/ca.crt
+      INFLUXDB3_AUTH_TOKEN_FILE: /influxdb_tokens/sfc.token
+    networks:
+      sfc:
+        ipv4_address: ${UTILS_IP}
+    volumes:
+      - ./certs/utils:/s3_certs:ro
+      - ./data/influxdb_credentials:/influxdb_credentials/
+      - ./certs/influxdb:/influxdb_certs:ro
+      - ./data/influxdb_tokens:/influxdb_tokens:ro
+      - ./certs/_master/ca.crt:/s3_certs/ca.crt:ro
+      - ./certs/_master/ca.crt:/influxdb_certs/ca.crt:ro
+    # No depends_on - utils should be independent for troubleshooting
+    command: ["tail","-f","/dev/null"]
+
+  grafana:
+    image: grafana:${GRAFANA_VERSION}
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - ./certs/_master/ca.crt:/usr/local/share/ca-certificates/ca.crt:ro
+      - grafana-storage:/var/lib/grafana
+    depends_on:
+      - influxdb
+    networks:
+      sfc:
+        ipv4_address: ${GRAFANA_IP}
+
+volumes:
+  grafana-storage:
+
+networks:
+  sfc:
+    ipam:
+      config:
+        - subnet: ${SFC_SUBNET}

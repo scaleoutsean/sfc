@@ -1,3 +1,4 @@
 apscheduler==3.11
 aiohttp[speedups]==3.12.13
+distro
 # aiodns==3.5.0

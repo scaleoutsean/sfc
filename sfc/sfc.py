@@ -4,25 +4,26 @@
 
 ###############################################################################
 # Synopsis:                                                                   #
-# SFC v2 schedules and executes gathering of SolidFire API object properties  #
-#  and performance metrics, enriches obtained data and sends it to InfluxDB 3 #
+# SFC v2.1 schedules and executes gathering of SolidFire API object           #
+#  properties and performance metrics, enriches obtained data and stores them # 
+#  in InfluxDB 3 for visualization and data analytics                         #
 #                                                                             #
 # SFC v1 used to be part of NetApp HCI Collector.                             #
 #                                                                             #
 # Author: @scaleoutSean                                                       #
-# https://github.com/scaleoutsean/sfc                                         #
-# License: the Apache License Version 2.1                                     #
+# Repository: https://github.com/scaleoutsean/sfc                             #
+# License: the Apache License Version 2.0                                     #
 ###############################################################################
 
 # =============== imports =====================================================
 
 import argparse
+from argparse import Namespace
 import aiohttp
 import asyncio
 from aiohttp import ClientSession, ClientResponseError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import datetime
-import distro
 from getpass import getpass
 import logging
 import logging.handlers
@@ -33,6 +34,7 @@ import os
 import platform
 import random
 import re
+import ssl
 import sys
 import warnings
 import time
@@ -49,13 +51,13 @@ VERSION = '2.1.0'
 # Modify these five variables to match your environment if you want hardcoded
 # values.
 # INFLUX_HOST, INFLUX_PORT, INFLUX_DB, INFLUXDB3_AUTH_TOKEN, SF_MVIP, SF_USERNAME, SF_PASSWORD
-INFLUX_HOST = '192.168.1.146'
+INFLUX_HOST = '192.168.1.169'
 INFLUX_PORT = '8181'  # default port for InfluxDB 3; sfc.py accesses it over HTTPS
 INFLUX_DB = 'sfc'
-INFLUXDB3_AUTH_TOKEN = 'apiv3_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+INFLUXDB3_AUTH_TOKEN = 'apiv3_...'
 SF_MVIP = '192.168.1.34'
-SF_USERNAME = 'monitoring'
-SF_PASSWORD = 'xxxxxxxxxx'
+SF_USERNAME = 'admin'
+SF_PASSWORD = '.....'
 
 # TLS certificates for SolidFire API:
 # https://docs.aiohttp.org/en/stable/client_advanced.html#example-use-self-signed-certificate
@@ -74,18 +76,20 @@ CHUNK_SIZE = 24
 
 # Global iteration counter
 ITERATION = 0
+# Global timestamp for current iteration (seconds since epoch)
+CURRENT_TIMESTAMP = None
 
 # Global variables - will be initialized based on configuration
 SF_JSON_PATH = '/json-rpc/12.5/'  # Default path, may be overridden
 SF_URL = f'https://{SF_MVIP}'  # Constructed from SF_MVIP
 SF_POST_URL = f'https://{SF_MVIP}/json-rpc/12.5/'  # Default URL
 CLUSTER_NAME = 'unknown'  # Will be set after connecting
-args = None  # Will be set by argparse
+args: Namespace  # Will be set by argparse
 
 # =============== functions code ==============================================
 
 
-# SolidFire headers (NO Authorization key!)
+# SolidFire headers (Basic Auth - no Authorization key!)
 sf_headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
 # InfluxDB headers (Bearer token)
 influx_headers = {'Accept': 'application/json', 'Accept-Encoding': 'deflate, gzip;q=1.0, *;q=0.5',
@@ -723,9 +727,10 @@ async def volume_performance(session, auth, **kwargs):
                     volume_line = "volume_performance,cluster=" + CLUSTER_NAME + ",id=" + \
                         str(volume['volumeID']) + ",name=" + \
                         volume_name + " " + kv_list
-            # NOTE: timestamp for the record
-            ts = str(int(round(time.time(), 0)))
-            volume_performance = volume_performance + volume_line + ts + "\n"
+            # NOTE: timestamp for the record will be removed since we will inject one per iteration in send_to_influx()
+            # ts = str(int(round(time.time(), 0)))
+            # volume_performance = volume_performance + volume_line + ts + "\n"
+            volume_performance = volume_performance + volume_line + "\n"
         b = b + 1
         volumes_performance = volumes_performance + volume_performance
     await send_to_influx(volumes_performance)
@@ -908,7 +913,7 @@ async def volume_qos_histograms(session, auth):
     """
     Get ListVolumeQoSHistograms results, extract, transform and send to InfluxDB.
     """
-    # NOTE: https://docs.influxdata.com/influxdb/v1/query_language/functions/#histogram
+    # NOTE: https://docs.influxdata.com/influxdb/v1/query_language/functions/#histogram (maybe for version 3 as well)
     # NOTE: It is resource-intensive so delay it a bit to avoid executing concurrently with other functions
     sleep_delay = random.randint(5, 10)
     await asyncio.sleep(sleep_delay)
@@ -1775,15 +1780,22 @@ async def list_database():
     url = f'https://{INFLUX_HOST}:{INFLUX_PORT}/api/v3/configure/database?format=json'
     headers = {
         'Authorization': f'Bearer {INFLUXDB3_AUTH_TOKEN}',
+        'Accept': 'application/json',
         'Content-Type': 'application/json'
     }
-    async with aiohttp.ClientSession() as session:
+    
+    # Create SSL context if TLS CA is specified
+    ssl_context = None
+    if os.environ.get('INFLUXDB3_TLS_CA'):
+        ssl_context = ssl.create_default_context(cafile=os.environ.get('INFLUXDB3_TLS_CA'))
+    
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
         async with session.get(url, headers=headers) as r:
             if r.status == 200:
                 data = await r.json()
-                if logging.getLogger().isEnabledFor(logging.DEBUG):
-                    logging.debug(f"List of databases: {data}")
-                dbs = [list(db.values())[0] for db in data]
+                # The response format is [{"iox::database":"_internal"},{"iox::database":"sfc"}]
+                dbs = [db["iox::database"] for db in data]
+                logging.info(f'Available databases: {dbs}')
                 return dbs
             else:
                 text = await r.text()
@@ -1794,38 +1806,94 @@ async def list_database():
 async def create_database_v3(INFLUX_DB):
     """
     Create InfluxDB 3 database using the /api/v3/configure/database endpoint and verify creation.
+    
+    In containerized environments, retries connection to InfluxDB during startup.
+    Returns True if database is available, False if creation failed.
     """
-    url = f'https://{INFLUX_HOST}:{INFLUX_PORT}/api/v3/configure/database'
-    headers = {
-        'Authorization': f'Bearer {INFLUXDB3_AUTH_TOKEN}',
-        'Content-Type': 'application/json'
-    }
-    payload = {"db": INFLUX_DB}
-    dbs = await list_database()
-    if INFLUX_DB in dbs:
-        logging.info(f"Database '{INFLUX_DB}' exists in InfluxDB. Skipping creation of new database.")
-        return
-    else:
-        logging.error(f"Database '{INFLUX_DB}' not found after creation attempt.")
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, json=payload) as r:
-            if r.status == 200:
-                if logging.getLogger().isEnabledFor(logging.DEBUG):
-                    logging.debug(
-                        msg=f"Database '{INFLUX_DB}' created or already exists (HTTP 200). Checking existence...")
-                return
+    max_retries = 3
+    retry_delay = 5  # seconds
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            if is_running_in_container():
+                logging.info(f"Running in container - attempt {attempt}/{max_retries} to verify database '{INFLUX_DB}'")
+            
+            # Try to list databases first
+            try:
+                dbs = await list_database()
+                if INFLUX_DB in dbs:
+                    logging.info(f"Database '{INFLUX_DB}' exists in InfluxDB. Skipping creation of new database.")
+                    return True
+            except Exception as e:
+                if attempt < max_retries:
+                    logging.warning(f"Attempt {attempt}/{max_retries}: Could not list databases: {e}. Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    logging.warning(f"Could not list databases after {max_retries} attempts: {e}. Will attempt to create database.")
+            
+            # Use the correct InfluxDB3 API endpoint and payload format (from working code)
+            url = f'https://{INFLUX_HOST}:{INFLUX_PORT}/api/v3/configure/database'
+            payload = {"name": INFLUX_DB}
+            
+            headers = {
+                'Authorization': f'Bearer {INFLUXDB3_AUTH_TOKEN}',
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            }
+            
+            # Create SSL context if TLS CA is specified
+            ssl_context = None
+            if os.environ.get('INFLUXDB3_TLS_CA'):
+                ssl_context = ssl.create_default_context(cafile=os.environ.get('INFLUXDB3_TLS_CA'))
+            
+            logging.info(f"Attempt {attempt}/{max_retries}: Attempting to create database '{INFLUX_DB}' using InfluxDB3 API")
+            
+            try:
+                async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
+                    async with session.post(url, headers=headers, json=payload) as r:
+                        if r.status == 201:
+                            logging.info(f"Database '{INFLUX_DB}' created successfully")
+                            return True
+                        elif r.status == 409:
+                            logging.info(f"Database '{INFLUX_DB}' already exists")
+                            return True
+                        else:
+                            response_text = await r.text()
+                            if attempt < max_retries:
+                                logging.warning(f"Attempt {attempt}/{max_retries}: Failed to create database '{INFLUX_DB}'. Status: {r.status}, Response: {response_text}. Retrying in {retry_delay} seconds...")
+                                await asyncio.sleep(retry_delay)
+                                continue
+                            else:
+                                logging.error(f"Failed to create database '{INFLUX_DB}' after {max_retries} attempts. Status: {r.status}, Response: {response_text}")
+                                return False
+            except Exception as e:
+                if attempt < max_retries:
+                    logging.warning(f"Attempt {attempt}/{max_retries}: Exception while connecting to InfluxDB: {e}. Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    logging.error(f"Exception while creating database '{INFLUX_DB}' after {max_retries} attempts: {e}")
+                    return False
+                    
+        except Exception as e:
+            if attempt < max_retries:
+                logging.warning(f"Attempt {attempt}/{max_retries}: Unexpected error: {e}. Retrying in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+                continue
             else:
-                text = await r.text()
-                logging.error(f"Failed to create database '{INFLUX_DB}'. Status: {r.status}, Response: {text}")
-                if logging.getLogger().isEnabledFor(logging.DEBUG):
-                    logging.debug(f"Database creation error: {text}")
-    return
+                logging.error(f"Unexpected error after {max_retries} attempts: {e}")
+                return False
+    
+    return False
 
 
 async def send_to_influx(payload):
     """
     Send received payload to InfluxDB 3 over HTTPS.
     """
+    global CURRENT_TIMESTAMP
+    
     original_lines = payload.splitlines()
     payload_lines = len(original_lines)
     if args.loglevel == 'DEBUG':
@@ -1867,8 +1935,44 @@ async def send_to_influx(payload):
             logging.debug('Diff between original and stripped payload:\n' + '\n'.join(diff))
         else:
             logging.debug('No differences found between original and stripped payload.')
-    payload = payload_stripped
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(enable_cleanup_closed=True)) as session:
+    
+    # Inject timestamp to each line if CURRENT_TIMESTAMP is set
+    if CURRENT_TIMESTAMP is not None:
+        import re
+        import datetime
+        timestamped_lines = []
+        for line in stripped_lines:
+            if line.strip():  # Skip empty lines
+                # Check if line already has a timestamp at the end (space followed by digits)
+                # Pattern matches space followed by 10+ digits (typical Unix timestamp)
+                timestamp_pattern = r'\s+\d{10,}$'
+                if re.search(timestamp_pattern, line):
+                    # Replace existing timestamp with CURRENT_TIMESTAMP
+                    timestamped_line = re.sub(timestamp_pattern, ' ' + str(CURRENT_TIMESTAMP), line)
+                else:
+                    # Add timestamp (space + timestamp) to end of line
+                    timestamped_line = line.rstrip() + " " + str(CURRENT_TIMESTAMP)
+                timestamped_lines.append(timestamped_line)
+        payload = '\n'.join(timestamped_lines)
+        # Log the timestamp being used
+        iso_timestamp = datetime.datetime.fromtimestamp(CURRENT_TIMESTAMP, tz=datetime.timezone.utc).isoformat()
+        logging.info(f'Using iteration timestamp: {CURRENT_TIMESTAMP} ({iso_timestamp}) for {payload_lines} lines')
+    else:
+        payload = payload_stripped
+    
+    # Configure SSL context for HTTPS connections to InfluxDB
+    ssl_context = None
+    ca_cert_path = os.environ.get('INFLUXDB3_TLS_CA')
+    if ca_cert_path and os.path.exists(ca_cert_path):
+        import ssl
+        ssl_context = ssl.create_default_context(cafile=ca_cert_path)
+        logging.debug(f'Using CA certificate file for InfluxDB connection: {ca_cert_path}')
+    else:
+        import ssl
+        ssl_context = ssl.create_default_context()
+        logging.debug('Using default SSL context for InfluxDB connection')
+    
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(enable_cleanup_closed=True, ssl=ssl_context)) as session:
         if INFLUXDB3_AUTH_TOKEN is None or INFLUXDB3_AUTH_TOKEN == '':
             logging.error('INFLUXDB3_AUTH_TOKEN is not set. Cannot send data to InfluxDB.')
             return False
@@ -1991,14 +2095,22 @@ async def hi_freq_tasks(auth):
     May call some non-time-sensitive functions if their output is essential for gathering time-sensitive metrics.
     """
     time_start = round(time.time(), 3)
-    global ITERATION
+    global ITERATION, CURRENT_TIMESTAMP
     ITERATION += 1
+    # Set global timestamp for this iteration cycle (all tasks in this cycle will use this)
+    CURRENT_TIMESTAMP = int(time.time())
     logging.info(
         "==> ITERATION " +
         str(ITERATION) +
-        " of high-frequency tasks.")
-    session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(
-        enable_cleanup_closed=True), headers=sf_headers)
+        " of high-frequency tasks. Timestamp: " + str(CURRENT_TIMESTAMP) + 
+        " (will be used by all tasks in this cycle)")
+    
+    # Create SSL context for SolidFire connections
+    ssl_context = ssl.create_default_context()
+    session = aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(ssl=ssl_context, enable_cleanup_closed=True), 
+        headers=sf_headers
+    )
     task_list = [cluster_faults, cluster_performance,
                  node_performance, volume_performance, sync_jobs]
     logging.info('High-frequency tasks: ' + str(len(task_list)))
@@ -2021,8 +2133,11 @@ async def med_freq_tasks(auth):
     Run medium-frequency (5-30 min interval) tasks for less time-sensitive operation data.
     """
     time_start = round(time.time(), 3)
-    session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(
-        enable_cleanup_closed=True, timeout_ceil_threshold=15), headers=sf_headers)
+    ssl_context = ssl.create_default_context()
+    session = aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(ssl=ssl_context, enable_cleanup_closed=True, timeout_ceil_threshold=15), 
+        headers=sf_headers
+    )
     task_list = [accounts, cluster_capacity, iscsi_sessions, volumes]
     logging.info('Medium-frequency tasks: ' + str(len(task_list)))
     bg_tasks = set()
@@ -2044,8 +2159,11 @@ async def lo_freq_tasks(auth):
     Run low-frequency (0.5-3 hour interval) tasks for non-time-sensitive metrics and events.
     """
     time_start = round(time.time(), 3)
-    session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(
-        enable_cleanup_closed=True, timeout_ceil_threshold=30), headers=sf_headers)
+    ssl_context = ssl.create_default_context()
+    session = aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(ssl=ssl_context, enable_cleanup_closed=True, timeout_ceil_threshold=30), 
+        headers=sf_headers
+    )
     task_list = [account_efficiency, cluster_version,
                  drive_stats, schedules, volume_efficiency]
     logging.info('Low-frequency tasks: ' + str(len(task_list)))
@@ -2068,13 +2186,16 @@ async def experimental(auth):
     Runs one or more medium-frequency and experimental collector tasks.
     """
     time_start = round(time.time(), 3)
-    session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(
-        enable_cleanup_closed=True, timeout_ceil_threshold=20), headers=sf_headers)
+    ssl_context = ssl.create_default_context()
+    session = aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(ssl=ssl_context, enable_cleanup_closed=True, timeout_ceil_threshold=20), 
+        headers=sf_headers
+    )
     task_list = [schedules, snapshot_groups, volume_qos_histograms]
     logging.info('Experimental tasks: ' + str(len(task_list)))
     bg_tasks = set()
     for t in task_list:
-        task = asyncio.create_task(t(session, auth))
+        task = asyncio.create_task(run_sf_task(t, session, auth))
         bg_tasks.add(task)
         task.add_done_callback(bg_tasks.discard)
     await asyncio.gather(*bg_tasks)
@@ -2092,7 +2213,12 @@ async def get_cluster_name(auth):
     """
     time_start = round(time.time(), 3)
     url = SF_URL + SF_JSON_PATH + '?method=GetClusterInfo'
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=True, force_close=True, enable_cleanup_closed=True), headers=sf_headers, auth=auth) as session:
+    ssl_context = ssl.create_default_context()
+    async with aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(ssl=ssl_context, force_close=True, enable_cleanup_closed=True), 
+        headers=sf_headers, 
+        auth=auth
+    ) as session:
         async with session.get(url, allow_redirects=True) as resp:
             if resp.status != 200:
                 text = await resp.text()
@@ -2117,13 +2243,34 @@ async def get_cluster_name(auth):
 
 
 async def main():
-    global ITERATION, CLUSTER_NAME, SF_URL, SF_JSON_PATH, SF_POST_URL, args
+    global ITERATION, CLUSTER_NAME, SF_URL, SF_JSON_PATH, SF_POST_URL, args, INFLUXDB3_AUTH_TOKEN
     ITERATION = 0
+    
+    # Load InfluxDB token from file if INFLUXDB3_AUTH_TOKEN_FILE is set
+    token_file = os.environ.get('INFLUXDB3_AUTH_TOKEN_FILE')
+    if token_file and os.path.exists(token_file):
+        try:
+            with open(token_file, 'r') as f:
+                file_token = f.read().strip()
+                if file_token:
+                    INFLUXDB3_AUTH_TOKEN = file_token
+                    logging.info(f'Loaded InfluxDB token from file: {token_file}')
+                else:
+                    logging.warning(f'Token file {token_file} is empty')
+        except Exception as e:
+            logging.error(f'Failed to read token from file {token_file}: {e}')
+    elif token_file:
+        logging.warning(f'Token file {token_file} does not exist')
+    
     # Prepare SolidFire auth
     auth = aiohttp.BasicAuth(args.username, args.password)
     CLUSTER_NAME = await get_cluster_name(auth)
+    
     # Ensure InfluxDB database exists or create it
-    await create_database_v3(INFLUX_DB)
+    database_ready = await create_database_v3(INFLUX_DB)
+    if not database_ready:
+        logging.error(f"Failed to create or verify database '{INFLUX_DB}'. Exiting.")
+        sys.exit(1)
     # Example: schedule hi/med/lo freq tasks with auth
     scheduler = AsyncIOScheduler(misfire_grace_time=10)
     scheduler.add_job(hi_freq_tasks, 'interval', seconds=INT_HI_FREQ, max_instances=1, args=[auth])
@@ -2207,6 +2354,17 @@ if __name__ == '__main__':
         help='name of InfluxDB database to use. SFC creates it if it does not exist. Default: ' +
         INFLUX_DB)
     parser.add_argument(
+        '-it',
+        '--influxdb-token',
+        nargs='?',
+        const=1,
+        type=str,
+        default=os.environ.get(
+            'INFLUXDB3_AUTH_TOKEN',
+            INFLUXDB3_AUTH_TOKEN),
+        required=False,
+        help='InfluxDB 3 API authentication token. Default: INFLUXDB3_AUTH_TOKEN environment variable or hardcoded value.')
+    parser.add_argument(
         '-fh',
         '--frequency-high',
         nargs='?',
@@ -2272,12 +2430,10 @@ if __name__ == '__main__':
     parser.add_argument(
         '-c',
         '--ca-chain',
-        nargs='?',
-        const=1,
         type=str,
-        default=None,
+        default=os.environ.get('CA_CHAIN'),
         required=False,
-        help='Optional filename with your (full) CA chain to be copied to the Ubuntu/Debian/Alpine OS certificate store. Users of other systems may import manually. Default: None')
+        help='Optional CA certificate file(s) to be copied to the Ubuntu/Debian/Alpine OS certificate store. For multiple files, separate with commas (e.g., "ca1.crt,ca2.crt"). Can be set via CA_CHAIN environment variable. Users of other systems may import manually. Default: None')
     parser.add_argument('-v', '--version', action='store_true', required=False,
                         help='Show program version and exit.')
     args = parser.parse_args()
@@ -2335,29 +2491,73 @@ if __name__ == '__main__':
         str(INT_LO_FREQ) +
         ' seconds.')
 
+    # Update global INFLUXDB3_AUTH_TOKEN if provided via argument
+    if args.influxdb_token is not None:
+        INFLUXDB3_AUTH_TOKEN = args.influxdb_token
+        logging.info('Using InfluxDB token provided via command line argument.')
+    else:
+        logging.info('Using InfluxDB token from environment variable or hardcoded value.')
+
+    # Update global InfluxDB connection variables from arguments/environment
+    if args.influxdb_host is not None:
+        INFLUX_HOST = args.influxdb_host
+    if args.influxdb_port is not None:
+        INFLUX_PORT = str(args.influxdb_port)
+    if args.influxdb_name is not None:
+        INFLUX_DB = args.influxdb_name
+    
+    # Debug logging for container environment
+    logging.info(f"InfluxDB connection: {INFLUX_HOST}:{INFLUX_PORT}, Database: {INFLUX_DB}")
+    logging.info(f"InfluxDB token length: {len(INFLUXDB3_AUTH_TOKEN)} characters")
+
     if args.experimental:
         logging.warning('Experimental collectors enabled.')
     else:
         logging.info('Experimental collectors disabled (recommended default)')
 
-    if args.ca_chain is not None and platform.system() == 'Linux' and (distro.id() in ['ubuntu', 'debian', 'alpine']):
-        if os.path.exists(args.c):
-            logging.info('Copying CA chain to OS certificate store.')
-            os.system(
-                'sudo cp ' +
-                args.ca_chain +
-                ' /usr/local/share/ca-certificates/')
-            # chmod 644 is required for the file to be picked up by
-            # update-ca-certificates
-            os.system(
-                'sudo chmod 644 /usr/local/share/ca-certificates/' +
-                os.path.basename(
-                    args.ca_chain))
-            os.system('sudo update-ca-certificates')
-            logging.info('OS certificate store refreshed.')
-        else:
-            logging.error('CA chain file not found. Exiting.')
-            sys.exit(1)
+    # Check if running in a container
+    def is_running_in_container():
+        """Detect if we're running inside a container"""
+        try:
+            with open('/proc/1/cgroup', 'r') as f:
+                return 'docker' in f.read() or 'containerd' in f.read()
+        except:
+            return False
+
+    # Handle CA certificate import (only for non-container environments)
+    if args.ca_chain is not None and platform.system() == 'Linux' and not is_running_in_container():
+        try:
+            import distro
+            if distro.id() in ['ubuntu', 'debian', 'alpine']:
+                # Parse comma-separated certificate files
+                cert_files = [f.strip() for f in args.ca_chain.split(',') if f.strip()]
+                logging.info(f'Processing {len(cert_files)} CA certificate file(s).')
+                all_files_exist = True
+                for cert_file in cert_files:
+                    if not os.path.exists(cert_file):
+                        logging.error(f'CA certificate file not found: {cert_file}')
+                        all_files_exist = False
+                
+                if all_files_exist:
+                    for cert_file in cert_files:
+                        logging.info(f'Copying CA certificate {cert_file} to OS certificate store.')
+                        os.system(f'sudo cp {cert_file} /usr/local/share/ca-certificates/')
+                        # chmod 644 is required for the file to be picked up by update-ca-certificates
+                        cert_basename = os.path.basename(cert_file)
+                        os.system(f'sudo chmod 644 /usr/local/share/ca-certificates/{cert_basename}')
+                    
+                    os.system('sudo update-ca-certificates')
+                    logging.info('OS certificate store refreshed with all CA certificates.')
+                else:
+                    logging.error('One or more CA certificate files not found. Exiting.')
+                    sys.exit(1)
+        except ImportError:
+            logging.warning('distro module not available, skipping OS certificate import')
+    elif args.ca_chain is not None and is_running_in_container():
+        # Parse comma-separated certificate files
+        cert_files = [f.strip() for f in args.ca_chain.split(',') if f.strip()]
+        cert_count = len(cert_files)
+        logging.info(f'Running in container - {cert_count} CA certificate(s) specified. Certificate handling should be done via Dockerfile or volume mounts')
 
     # The below works for SolidFire 12.5, 12.7 or a higher v12
     SF_JSON_PATH = '/json-rpc/12.5/'

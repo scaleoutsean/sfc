@@ -117,6 +117,8 @@ ipython_config.py
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
 __pypackages__/
+__pycache__/
+docs/.markdownlint.json
 
 # Celery stuff
 celerybeat-schedule
@@ -163,3 +165,27 @@ sfc.code-workspace
 .vscode/
 .pylintrc
 
+
+
+# Ignore all files in certs/ but keep directories
+certs/**/*
+!certs/**/.gitkeep
+
+# Ignore all files in data/ but keep directories
+data/**/*
+!data/**/
+
+# Backup files with timestamps
+*.20*
+
+# But keep .gitkeep files to preserve directory structure
+!data/**/.gitkeep
+!certs/**/*.py
+!certs/**/*.conf
+!certs/**/*.md
+!certs/**/*.txt
+!certs/**/*.sh
+
+# Ignore certificate files in sfc/certs/ but keep directory
+sfc/certs/*
+!sfc/certs/.gitkeep
