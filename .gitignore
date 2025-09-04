@@ -165,7 +165,8 @@ sfc.code-workspace
 .vscode/
 .pylintrc
 
-
+# InfluxDB explorer
+!explorer/Dockerfile
 
 # Ignore all files in certs/ but keep directories
 certs/**/*
