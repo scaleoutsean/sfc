@@ -46,7 +46,7 @@ os.environ["PYTHONWARNINGS"] = "default"
 
 # =============== default vars ================================================
 
-VERSION = '2.1.0'
+VERSION = '2.1.1'
 
 # Create reporting-only admin user with read-only access to the SolidFire API.
 # Modify these five variables to match your environment if you want hardcoded
@@ -87,6 +87,10 @@ SF_POST_URL = f'https://{SF_MVIP}/json-rpc/12.5/'  # Default URL
 CLUSTER_NAME = 'unknown'  # Will be set after connecting
 args: Namespace  # Will be set by argparse
 
+# Volume name cache - RAM-based cache for volume ID to name mapping
+VOLUME_NAME_CACHE = {}  # {volume_id: volume_name}
+CACHE_LAST_UPDATED = 0  # Timestamp of last cache update
+
 # =============== functions code ==============================================
 
 
@@ -122,6 +126,52 @@ async def sf_api_post(session, url, payload, auth):
             logging.error(f"[SF DEBUG] Exception: {e}")
             logging.error(f"[SF DEBUG] Raw response text: {text}")
             raise
+
+
+def get_volume_name_from_cache(volume_id):
+    """
+    Get volume name from cache, return empty string if not found.
+    Used by high-frequency tasks that need volume names but don't want to wait for API calls.
+    """
+    global VOLUME_NAME_CACHE
+    return VOLUME_NAME_CACHE.get(volume_id, '')
+
+
+def get_volumes_from_cache(return_format='list'):
+    """
+    Get all volume ID-name mappings from cache.
+    
+    Args:
+        return_format: 'list' returns [(id, name), ...], 'dict' returns {id: name, ...}
+        
+    Returns:
+        list of tuples or dict depending on return_format
+    """
+    global VOLUME_NAME_CACHE
+    
+    if return_format == 'dict':
+        return VOLUME_NAME_CACHE.copy()
+    else:  # return_format == 'list'
+        return [(vol_id, vol_name) for vol_id, vol_name in VOLUME_NAME_CACHE.items()]
+
+
+def update_volume_name_cache(volume_mapping):
+    """
+    Update the global volume name cache with new volume ID to name mapping.
+    Called by med_freq_tasks after collecting full volume data.
+    
+    Args:
+        volume_mapping: dict of {volume_id: volume_name} or list of (volume_id, volume_name) tuples
+    """
+    global VOLUME_NAME_CACHE, CACHE_LAST_UPDATED
+    
+    if isinstance(volume_mapping, dict):
+        VOLUME_NAME_CACHE.update(volume_mapping)
+    elif isinstance(volume_mapping, list):
+        VOLUME_NAME_CACHE.update(dict(volume_mapping))
+    
+    CACHE_LAST_UPDATED = time.time()
+    logging.debug(f"Volume name cache updated with {len(volume_mapping)} entries at {CACHE_LAST_UPDATED}")
 
 
 async def volumes(session, auth, **kwargs):
@@ -216,17 +266,29 @@ async def volumes(session, auth, **kwargs):
                 "Duplicate metrics found in paired volume measurements (tags and fields): " +
                 t[0])
             exit(200)
+    
+    # Timing instrumentation - API call
+    api_start = time.time()
     api_payload = "{ \"method\": \"ListVolumes\", \"params\": {\"volumeStatus\": \"active\"} }"
     try:
         r = await sf_api_post(session, SF_POST_URL, api_payload, auth)
         result = r['result']['volumes']
+        api_time = time.time() - api_start
+        logging.info(f"[TIMING] API call (ListVolumes) took: {api_time:.3f} seconds for {len(result)} volumes")
     except Exception as e:
         logging.error('Function volumes: volume information not obtained - returning.')
         logging.error(e)
         return
     if not kwargs:
+        # Timing instrumentation - main processing loop
+        processing_start = time.time()
         volumes = ''
+        volume_pair_time = 0
+        trident_attr_time = 0
+        string_building_time = 0
+        
         for volume in result:
+            volume_start = time.time()
             single_volume = "volumes,cluster=" + CLUSTER_NAME + ","
             # NOTE: this needs to be an integer in InfluxDB. None won't work
             if volume['qosPolicyID'] is None:
@@ -235,8 +297,10 @@ async def volumes(session, auth, **kwargs):
             # volumePairs is not empty
             volume_paired = False
             if volume['volumePairs'] != []:
+                vp_start = time.time()
                 volume_pairs = volume['volumePairs']
                 vp = await extract_volume_pair(volume_pairs)
+                volume_pair_time += (time.time() - vp_start)
                 if args.loglevel == 'DEBUG':
                     logging.debug(
                         'VP returned from extract_volume_pair: ' + str(vp))
@@ -291,7 +355,9 @@ async def volumes(session, auth, **kwargs):
                                   str(volume['volumeID']) +
                                   ' has non-empty attributes.')
                 try:
+                    trident_start = time.time()
                     vol_attr_fields = await extract_trident_volume_attributes(volume['attributes'])
+                    trident_attr_time += (time.time() - trident_start)
                     if vol_attr_fields != '':
                         single_volume = single_volume + vol_attr_fields + ","
                         if args.loglevel == 'DEBUG':
@@ -327,18 +393,47 @@ async def volumes(session, auth, **kwargs):
                     if args.loglevel == 'DEBUG':
                         logging.debug("single_volume tags for volume + " +
                                       str(volume['volumeID']) + ": " + str(single_volume))
+            # Add per-volume string building time
+            volume_time = time.time() - volume_start
+            string_building_time += volume_time
             volumes = volumes + single_volume + "\n"
+        
+        processing_time = time.time() - processing_start
+        
+        # Timing summary before InfluxDB write
+        logging.info(f"[TIMING] Volume processing breakdown:")
+        logging.info(f"[TIMING]   - Volume pair extraction: {volume_pair_time:.3f}s")
+        logging.info(f"[TIMING]   - Trident attributes: {trident_attr_time:.3f}s") 
+        logging.info(f"[TIMING]   - String building total: {string_building_time:.3f}s")
+        logging.info(f"[TIMING]   - Total processing: {processing_time:.3f}s")
+        
+        # Time the InfluxDB write
+        influx_start = time.time()
         await send_to_influx(volumes)
+        influx_time = time.time() - influx_start
+        logging.info(f"[TIMING] InfluxDB write took: {influx_time:.3f} seconds")
+        
+        # Update volume name cache after processing all volumes (med_freq_tasks)
+        volume_cache_data = [(volume['volumeID'], volume['name']) for volume in result]
+        update_volume_name_cache(volume_cache_data)
+        logging.info(f"Updated volume name cache with {len(volume_cache_data)} volume entries")
+        
     elif kwargs.keys() == {'names'} or kwargs.keys() == {'names_dict'}:
+        # Timing instrumentation - lightweight processing for names only
+        names_start = time.time()
         for key in kwargs:
             if key == 'names':
                 volumes = []
                 for volume in result:
                     volumes.append((volume['volumeID'], volume['name']))
+                names_time = time.time() - names_start
+                logging.info(f"[TIMING] Names extraction took: {names_time:.3f} seconds for {len(volumes)} volumes")
                 return volumes
             elif key == 'names_dict':
                 volumes_dict = dict(
                     map(lambda x: (x['volumeID'], x['name']), result))
+                names_time = time.time() - names_start
+                logging.info(f"[TIMING] Names dict extraction took: {names_time:.3f} seconds for {len(volumes_dict)} volumes")
                 return volumes_dict
     else:
         logging.error('Invalid argument passed to volumes() function.')
@@ -359,8 +454,6 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
     Currently only the first paired volume (from possible several when paired one-to-many) is processed.
     Additional volumes and values may be added in the future.
     """
-    time_start = round(time.time(), 3)
-    function_name = 'extract_volume_pair'
     vp = {}
     if volume_pairs == [] or len(volume_pairs) > 1:
         if args.loglevel == 'DEBUG':
@@ -369,6 +462,7 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
             'Volume pairs list is empty or one-to-many detected (not implemented). Returning.')
     else:
         vp_dict = volume_pairs[0]
+        
         for k in vp_dict:
             try:
                 # pop from k['clusterPairID']
@@ -456,14 +550,8 @@ async def extract_volume_pair(volume_pairs: list) -> dict:
             logging.warning(
                 'KeyError while parsing remoteReplication dictionary: ' + str(e))
             return {}
-    time_taken = max(0.0, round(time.time() - time_start, 3))
     if args.loglevel == 'DEBUG':
         logging.debug('Volume pair payload: ' + str(vp) + '.')
-    logging.info(
-        'Volume pair data extracted in ' +
-        str(time_taken) +
-        ' seconds.')
-    await _send_function_stat(CLUSTER_NAME, function_name, time_taken)
     if vp:
         return vp
     else:
@@ -623,7 +711,7 @@ async def volume_performance(session, auth, **kwargs):
                           str(len(all_volumes)) + ' elements.')
     except Exception as e:
         logging.error(
-            'Volume information not obtained or malformed. Returning.')
+            'Volume information not obtained from cache or malformed. Returning.')
         logging.error(e)
         return
     fields = [('actualIOPS', 'actual_iops'),
@@ -926,7 +1014,7 @@ async def volume_qos_histograms(session, auth):
     volumes_dict = None
     try:
         volumes_dict = await volumes(session, auth, names_dict=True)
-        isinstance(volumes, dict)
+        isinstance(volumes_dict, dict)
         if args.loglevel == 'DEBUG':
             logging.debug('ID-volume KV pairs obtained from volumes: ' +
                           str(len(volumes_dict)) + ' pairs.')
@@ -1985,7 +2073,9 @@ async def send_to_influx(payload):
             "Authorization": f"Bearer {INFLUXDB3_AUTH_TOKEN}",
             "Content-Type": "text/plain; charset=utf-8"
         }
-        async with session.post(url=urlPostEndpoint, data=payload, headers=headers) as db_session:
+        # Use a shorter timeout to avoid hanging on S3 writes
+        timeout = aiohttp.ClientTimeout(total=30)  # 30-second timeout instead of default
+        async with session.post(url=urlPostEndpoint, data=payload, headers=headers, timeout=timeout) as db_session:
             resp = db_session.status
         await session.close()
     if resp != 204:
@@ -2027,6 +2117,9 @@ async def _send_function_stat(cluster_name, function, time_taken):
     """
     Send SFC function execution metrics to InfluxDB.
     """
+    if args.no_instrumenting:
+        return  # Skip instrumentation entirely when --no-instrumenting flag is set
+    
     try:
         await send_to_influx("sfc_metrics,cluster=" + cluster_name + ",function=" + function + " " + "time_taken=" + str(time_taken) + "\n")
     except BaseException:
@@ -2433,6 +2526,8 @@ if __name__ == '__main__':
         default=os.environ.get('CA_CHAIN'),
         required=False,
         help='Optional CA certificate file(s) to be copied to the Ubuntu/Debian/Alpine OS certificate store. For multiple files, separate with commas (e.g., "ca1.crt,ca2.crt"). Can be set via CA_CHAIN environment variable. Users of other systems may import manually. Default: None')
+    parser.add_argument('--no-instrumenting', action='store_true', required=False,
+                        help='Disable function performance instrumentation to improve collection speed when InfluxDB writes are slow.')
     parser.add_argument('-v', '--version', action='store_true', required=False,
                         help='Show program version and exit.')
     args = parser.parse_args()
@@ -2496,6 +2591,14 @@ if __name__ == '__main__':
     # First try to load from token file (container environment)
     if token_file and os.path.exists(token_file):
         try:
+            # Debug: Log file timestamp before reading
+            import os
+            stat_info = os.stat(token_file)
+            import time
+            mtime = time.ctime(stat_info.st_mtime)
+            size = stat_info.st_size
+            logging.info(f'DEBUG: Token file {token_file} - Modified: {mtime}, Size: {size} bytes')
+            
             with open(token_file, 'r') as f:
                 file_token = f.read().strip()
                 # Remove any ANSI escape sequences (in case token was generated with colored output)
@@ -2504,6 +2607,7 @@ if __name__ == '__main__':
                 if file_token:
                     INFLUXDB3_AUTH_TOKEN = file_token
                     logging.info(f'Using InfluxDB token loaded from file: {token_file}')
+                    # Security: Don't log token content
                 else:
                     logging.warning(f'Token file {token_file} is empty.')
         except Exception as e:
@@ -2549,6 +2653,11 @@ if __name__ == '__main__':
         logging.warning('Experimental collectors enabled.')
     else:
         logging.info('Experimental collectors disabled (recommended default)')
+
+    if args.no_instrumenting:
+        logging.warning('Function performance instrumentation disabled (--no-instrumenting flag active)')
+    else:
+        logging.info('Function performance instrumentation enabled')
 
     # Check if running in a container
     def is_running_in_container():

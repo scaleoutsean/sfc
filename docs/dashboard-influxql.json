@@ -2,8 +2,8 @@
   "__inputs": [
     {
       "name": "DS_SFC",
-      "label": "sfc",
-      "description": "",
+      "label": "SFC",
+      "description": "SolidFire Collector InfluxDB Data Source",
       "type": "datasource",
       "pluginId": "influxdb",
       "pluginName": "InfluxDB"

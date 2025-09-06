@@ -44,29 +44,23 @@ services:
       # Port 8182 (admin token recovery) is NOT exposed externally for security
       # It's only accessible within the Docker network for internal token generation
     environment:
-      S3_ENDPOINT: https://s3:7070
+      # Removed S3-related environment variables since we're using local file storage
       TLS_KEY: /home/influxdb3/certs/influxdb.key
       TLS_CERT: /home/influxdb3/certs/influxdb.crt
       TLS_MIN_VERSION: tls-1.3
       INFLUXDB3_TLS_CA: /home/influxdb3/certs/ca.crt
       TLS_CA: /home/influxdb3/certs/ca.crt
-      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
-      S3_CREDENTIALS_FILE: /influxdb_credentials/credentials
       NODE_ID: ${INFLUXDB_NODE_ID}
-      BUCKET: ${S3_BUCKET}
       INFLUXDB3_ADMIN_TOKEN: ${INFLUXDB_ADMIN_TOKEN}
       TOKEN_FILE: /influxdb_tokens/sfc.token
       # Disable anonymous usage analytics (InfluxDB3 specific)
       INFLUXDB3_TELEMETRY_DISABLE_UPLOAD: ${INFLUXDB3_TELEMETRY_DISABLE_UPLOAD}
     volumes:
       - ./data/influxdb:/var/lib/influxdb3
-      - ./data/influxdb_credentials/credentials:/influxdb_credentials/credentials:ro
       - ./certs/influxdb:/home/influxdb3/certs:ro
       - ./data/influxdb_tokens:/influxdb_tokens
       - ./certs/_master/ca.crt:/home/influxdb3/certs/ca.crt:ro
-    depends_on:
-      - s3
+    # Removed S3 dependency since we're using local file storage
     entrypoint: ["/home/influx/influxdb3-entrypoint.sh"]
     command: []
     networks:
@@ -82,6 +76,7 @@ services:
         PYTHON_VERSION: ${PYTHON_VERSION}
         PYTHON_DIGEST: ${PYTHON_DIGEST}
     container_name: sfc
+    command: ["--no-instrumenting"]
     environment:
       INFLUX_HOST: influxdb
       INFLUX_PORT: ${INFLUXDB_PORT}
@@ -92,6 +87,7 @@ services:
       INT_HI_FREQ: ${SFC_HI_FREQ}
       INT_MED_FREQ: ${SFC_MED_FREQ}
       INT_LO_FREQ: ${SFC_LO_FREQ}
+      INT_EXPERIMENTAL_FREQ: ${SFC_EXPERIMENTAL_FREQ}
       SF_MVIP: ${SF_MVIP}
       SF_USERNAME: ${SF_USERNAME}
       SF_PASSWORD: ${SF_PASSWORD}
@@ -145,8 +141,19 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      # HTTPS Configuration
+      GF_SERVER_PROTOCOL: https
+      GF_SERVER_CERT_FILE: /etc/grafana/certs/grafana.crt
+      GF_SERVER_CERT_KEY: /etc/grafana/certs/grafana.key
+      # Trust custom CA for InfluxDB connections
+      GF_SERVER_ROOT_URL: https://localhost:${GRAFANA_PORT}
+      # Workaround for Grafana 12.1 custom CA bug
+      GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "false"
+      GF_DATABASE_SSL_MODE: "disable"
+      GF_PLUGIN_ENABLE_ALPHA: "true"
     volumes:
       - ./certs/_master/ca.crt:/usr/local/share/ca-certificates/ca.crt:ro
+      - ./certs/grafana:/etc/grafana/certs:ro
       - grafana-storage:/var/lib/grafana
     depends_on:
       - influxdb

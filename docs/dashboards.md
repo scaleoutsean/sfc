@@ -7,6 +7,10 @@
     - [Aliasing or replacing Grafana's labels](#aliasing-or-replacing-grafanas-labels)
     - [Overcoming long updates of certain measurements](#overcoming-long-updates-of-certain-measurements)
     - [Add cluster or data source other variable to dashboard](#add-cluster-or-data-source-other-variable-to-dashboard)
+  - [InfluxDB 3 down-sampling](#influxdb-3-down-sampling)
+    - [Field aggregations](#field-aggregations)
+    - [Reference dashboard](#reference-dashboard)
+    - [Grafana setup](#grafana-setup)
   - [Measurements](#measurements)
     - [Experimental measurements](#experimental-measurements)
   - [Reference InfluxQL queries and dashboard examples SFC](#reference-influxql-queries-and-dashboard-examples-sfc)
@@ -57,16 +61,19 @@ Within a container in the same Docker Compose, use InfluxDB service name. Outsid
 ```sh
 export TOKEN="apiv3_5upbASlk1..."
 export FQDN_SAN="influxdb.corp.com.org"
-influxdb3 query --database sfc 'SELECT name,time FROM volume_performance ORDER BY time DESC LIMIT 3;' -H https://${FQDN_SAN}:8181 --token $TOKEN
+influxdb3 query --database sfc 'SELECT name,time FROM volume_performance ORDER BY time DESC LIMIT 3;' -H https://${FQDN_SAN}:8181 --token "$TOKEN"
 ```
 
 From the `utils` container:
 
 ```sh
+root@bda9d30b0ef1:/# cd /home/influx/.influxdb
+
 root@bda9d30b0ef1:/home/influx/.influxdb# pwd
 /home/influx/.influxdb
+
 root@bda9d30b0ef1:/home/influx/.influxdb# ./influxdb3 show databases -H https://influxdb:8181 \
-  --token apiv3_Ghq --tls-ca /s3_certs/ca.crt 
+  --token "apiv3_Ghq" --tls-ca /s3_certs/ca.crt 
 +---------------+
 | iox::database |
 +---------------+
@@ -97,16 +104,16 @@ How to create an InfluxDB source in Grafana 12.2:
 
 ### Aliasing or replacing Grafana's labels
 
-Certain parts of Grafana are hard to use.
+Certain features of Grafana are hard to use.
 
-Personally I find the difficulty of aliasing data in labels the worst. Below in Account Efficiency, there's an example on how to do that. The same general technique works for other metrics below. The Grafana Web site and Community have additional approaches and workarounds.
+Personally I find the difficulty of aliasing data in labels the worst. Below in Account Efficiency there's an example on how to do that. The same general technique works for other metrics below. The Grafana Web site and Community have additional approaches and workarounds.
 
 ### Overcoming long updates of certain measurements
 
 As explained elsewhere, SFC uses three schedules for high, medium and low-frequency of data collection.
 
 - First, the idea is that one is *unlikely* to have high- and low-frequency metrics in the same dashboard, but if they do, then they won't need to zoom to less than 15-60 minute windows
-- Second, most users who do need to zoom to 1-15 minute segments will want to do that only for a subset of data and a best practice for this is to not have all panels zoomable to that level
+- Second, most users who do need to zoom to 1-15 minute intervals will want to do that only for a subset of data and a best practice for this is to not have all panels zoomable to that level
 
 You may consider this approach:
 
@@ -129,6 +136,66 @@ Users who have multiple clusters or data sources may [add variables to dashboard
 That may also be useful for dealing with down-sampled data because down-sampled and default measurement names differ in InfluxDB v1.
 
 The reference dashboard has a cluster name variable, which can be useful if multiple clusters report into the same InfluxDB. Select "All" to view all clusters, or any individual if you want to see just one. Panels may be adjusted to show a separate panel for each variable (i.e. two panels for two clusters) or all in one (repeat disabled, which is the default) - to see those go to: Panel Options > Repeat options.
+
+## InfluxDB 3 down-sampling
+
+Down-sampling for `volume_performance` measurement is built into InluxDB container's startup script (`./influxdb/influxdb3-entrypoint.sh`).
+
+The tricky (annoying, actually) part is the way InfluxDB (as most other databases) does this is it creates a new table. So your existing dashboards can't query down-sampled data.
+
+`./docs/dashboard-sql-downsampling.json` is a minimal dashboard for InfluxDB data sources with SQL (not InfluxQL) query language. It demonstrates how Grafana works around this limitation to transparently work with a down-sampled measurements.
+
+Note that SFC v2.1.1 comes with three down-sampling policies for volume performance, while the reference dash-board covers only one (plus current data), so after two weeks you could add queries the other two: copy the reference panel and edit it to determine how to query data from tables from the other two down-sampling queries.
+
+Volume Performance is probably the only measurement which can benefit from down-sampling, so it is enabled by default.
+
+### Field aggregations
+
+Different metrics use appropriate aggregation methods as per InfluxDB down-sampling plugin recommendations:
+
+- Latency fields: `avg` (meaningful average)
+- IOPS/throughput: `sum` (accurate totals)  
+- Utilization: `avg` (representative values)
+- Capacity: `last` (latest value)
+
+### Reference dashboard
+
+The reference dashboard (`docs/dashboard-sql-downsampling.json`) demonstrates transparent access to multiple resolution layers:
+
+```sql
+-- Automatically selects best resolution for time range
+WITH time_bounds AS (
+  SELECT $__timeFrom() as start, $__timeTo() as end
+),
+fresh_data AS (
+  SELECT * FROM volume_performance
+  WHERE time >= start AND time >= (end - INTERVAL '7 days')
+),
+archived_data AS (  
+  SELECT * FROM volume_performance_5m_auto
+  WHERE time >= start AND time < (end - INTERVAL '7 days')
+)
+SELECT * FROM fresh_data UNION ALL SELECT * FROM archived_data
+```
+
+### Grafana setup
+
+- Import the reference dashboard from `docs/dashboard-sql-downsampling.json`
+- Create (or rename) data source as `SFC` (tagged with `SolidFire`)
+- Use time range variables (dashboards automatically choose optimal resolution)
+- Cluster and volume filtering: multi-select drop-down with regex support is available
+
+Data Source configuration for reference down-sampling dashboard should use SQL query language.
+
+```json
+{
+  "name": "SFC",
+  "type": "influxdb", 
+  "url": "https://your-influxdb:8181",
+  "database": "sfc",
+  "tags": ["SolidFire"]
+}
+```
 
 ## Measurements
 

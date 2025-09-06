@@ -1,4 +1,7 @@
+# APScheduler job scheduler
 apscheduler==3.11
+# Fast HTTP client with speedups
 aiohttp[speedups]==3.12.13
-distro
+# Linux distribution info for CA handling
+distro>=1.8.0
 # aiodns==3.5.0

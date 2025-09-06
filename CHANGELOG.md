@@ -1,6 +1,7 @@
 # Change Log
 
 - [Change Log](#change-log)
+  - [Changes in v2.1.1](#changes-in-v211)
   - [Changes in v2.1.0](#changes-in-v210)
   - [Changes in v2.0.0](#changes-in-v200)
   - [Changes in v0.7.1](#changes-in-v071)
@@ -12,6 +13,13 @@
   - [Changes in .3](#changes-in-3)
   - [Changes in .v2](#changes-in-v2)
   - [Changes in .v1](#changes-in-v1)
+
+## Changes in v2.1.1
+
+- Pre-configured down-sampling for the most demanding/demanded measurement (`volume_performance`)
+- New demo panel that transparently handles down-sampling for volume performance
+- Set InfluxDB to work with disk storage and make S3 optional (it's left in place, use `docker-compose.yaml` and InfluxDB configuration from v2.1.0 if you want S3 tiering) until more testing has been done
+- New SFC switch (`--no-instrumenting`) (enabled by default) to avoid collecting SFC's "internal" performance measurements in order to reduce the number of write requests to InfluxDB
 
 ## Changes in v2.1.0
 

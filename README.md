@@ -44,8 +44,8 @@ Grafana has to be user-provided and dashboards created once InfluxDB is added as
   - CPU and RAM requirements: SFC is expected to use around 1-2% CPU and 70MB RAM (guesstimate for hard limits: 5% CPU, 100 MB RAM).
   - Disk requirements for SFC are just the container itself. If InfluxDB tiers to S3, a small SolidFire cluster might create around 25 MB of new data per day on S3 bucket (without down-sampling)
   - Applications to store and visualize data
-    - Recent InfluxDB 3 Core and admin (aka "operator") API token (SFC creates a database itself if database DB does not exist, otherwise - if admin creates a database for you - you may use a "user" token with lesser permissions)
-    - Recent Grafana (12.2) - SFC v2 has no direct or indirect dependency on Grafana, but 12.1 and earlier have bugs related to InfluxDB 3 Core
+    - Recent InfluxDB 3 Core and admin (aka "operator") API token (SFC creates a database itself if database DB does not exist, otherwise - if admin creates a database for you - you may use a "user" API token with lesser permissions)
+    - Recent Grafana (12.2 or better) - SFC v2 has no direct or indirect dependency on Grafana, but 12.1 and earlier have bugs related to connecting over HTTPS to InfluxDB 3 Core with internal/custom CA
 
 - SolidFire-specific details
   - **Unique** volume names - this is not enforced by the SolidFire API since it is volume IDs that are unique by default. Most people don't use duplicate volume names because it's confusing, but if you happen to have duplicate volume names, don't use SFC because it won't work well
@@ -65,8 +65,8 @@ If using existing InfluxDB, ask the admin for access to a new `sfc` database. By
 Then download, install and run SFC:
 
 ```sh
-# release v2.0.0 uses InfluxDB 1
-git clone -b v2.1.0 https://github.com/scaleoutsean/sfc/
+# release v2.0.0 uses InfluxDB 1; v2.1.0 uses InfluxDB + S3 tiering
+git clone -b v2.1.1 https://github.com/scaleoutsean/sfc/
 cd sfc/sfc
 python3 -m venv .venv
 source .venv/bin/activate
@@ -74,6 +74,7 @@ python3 -m pip install -r requirements.txt
 # With InfluxDB 3 at https://192.168.1.146:8181, valid TLS certs on SF and InfluxDB,
 #   InfluxDB database 'sfc' will be automatically created by SFC if InfluxDB Admin Token is valid 
 #   and Influx database 'sfc' does not exist. HTTPS is assumed.
+API_TOKEN="api...."
 python3 ./sfc.py --mvip 192.168.1.30 -u monitor -p ******* -ih s146.datafabric.lan -it $API_TOKEN -ip 8181 -id sfc
 ```
 
@@ -121,12 +122,11 @@ $ docker-compose exec utils bash -c 'TOKEN=$(cat /influxdb_tokens/sfc.token) && 
 
 ## `sfc.py`
 
-After we descend to the `sfc` directory, create a Python venv and install modules from `sfc/requirements.txt`:
+After we descend to the `sfc` directory, create a Python virtual environment and install modules from `sfc/requirements.txt`:
 
 ```sh
-$ ./sfc/sfc.py -h
-usage: sfc.py [-h] [-m [MVIP]] [-u USERNAME] [-p PASSWORD] [-ih [INFLUXDB_HOST]] [-ip [INFLUXDB_PORT]] [-id [INFLUXDB_NAME]] [-it [INFLUXDB_TOKEN]] [-fh [HI]] [-fm [MED]] [-fl [LO]] [-ex] [-ll [{DEBUG,INFO,WARNING,ERROR,CRITICAL}]] [-lf [LOGFILE]]
-              [-c CA_CHAIN] [-v]
+usage: sfc.py [-h] [-m [MVIP]] [-u USERNAME] [-p PASSWORD] [-ih [INFLUXDB_HOST]] [-ip [INFLUXDB_PORT]] [-id [INFLUXDB_NAME]] [-it [INFLUXDB_TOKEN]] [-fh [HI]] [-fm [MED]] [-fl [LO]] [-ex]
+              [-ll [{DEBUG,INFO,WARNING,ERROR,CRITICAL}]] [-lf [LOGFILE]] [-c CA_CHAIN] [--no-instrumenting] [-v]
 
 Collects SolidFire metrics and sends them to InfluxDB.
 
@@ -145,7 +145,7 @@ options:
   -id [INFLUXDB_NAME], --influxdb-name [INFLUXDB_NAME]
                         name of InfluxDB database to use. SFC creates it if it does not exist. Default: sfc
   -it [INFLUXDB_TOKEN], --influxdb-token [INFLUXDB_TOKEN]
-                        InfluxDB 3 API authentication token. Default: INFLUXDB3_AUTH_TOKEN environment variable or hardcoded value.
+                        InfluxDB 3 API authentication token. Will prioritize token file, then this argument, then environment variable.
   -fh [HI], --frequency-high [HI]
                         high-frequency collection interval in seconds. Default: 60
   -fm [MED], --frequency-med [MED]
@@ -158,8 +158,9 @@ options:
   -lf [LOGFILE], --logfile [LOGFILE]
                         log file name. SFC logs only to console by default. Default: None
   -c CA_CHAIN, --ca-chain CA_CHAIN
-                        Optional CA certificate file(s) to be copied to the Ubuntu/Debian/Alpine OS certificate store. For multiple files, separate with commas (e.g., "ca1.crt,ca2.crt"). Can be set via CA_CHAIN environment variable. Users of other systems
-                        may import manually. Default: None
+                        Optional CA certificate file(s) to be copied to the Ubuntu/Debian/Alpine OS certificate store. For multiple files, separate with commas (e.g., "ca1.crt,ca2.crt"). Can be set via CA_CHAIN
+                        environment variable. Users of other systems may import manually. Default: None
+  --no-instrumenting    Disable function performance instrumentation to improve collection speed when InfluxDB writes are slow.
   -v, --version         Show program version and exit.
 
 Author: @scaleoutSean https://github.com/scaleoutsean/sfc License: the Apache License 2.0
@@ -169,7 +170,7 @@ Author: @scaleoutSean https://github.com/scaleoutsean/sfc License: the Apache Li
 You can also try this, which should load `SF_USERNAME` and `SF_PASSWORD` from environment variables or prompt you to provide them:
 
 ```sh
-./sfc.py --mvip 192.168.1.30 -ih 192.168.1.146 -it API_TOKEN -ip 8181 -id sfc
+./sfc.py --mvip 192.168.1.30 -ih 192.168.1.146 -it ${API_TOKEN} -ip 8181 -id sfc
 ```
 
 If you want something different, try `-h` or hard-code argument values into script for a test run and try with just `python3 ./sfc/sfc.py` (and nothing else).
@@ -192,10 +193,10 @@ If you want something different, try `-h` or hard-code argument values into scri
 - Network
   - SFC only connects to SolidFire to gather metrics which are then sent to InfluxDB. No other connections are required (of course, DNS for name resolution may be needed). SFC never attempts to connect to the Internet on its own.
 - 3rd party containers and packages
-  - InfluxDB version 3.0 only supported admin tokens. Multiple SFC instances can securely share one InfluxDB data base server if each SFC used a different database token, and they can also use the same InfluxDB database as every measurement is tagged with SolidFire cluster name. HTTP access to InfluxDB is possible, but SFC does not use that option
+  - InfluxDB version 3.3 supports "user" tokens. Multiple SFC instances can use them to securely share one InfluxDB database server and they can also use the same InfluxDB database as every measurement is tagged with SolidFire cluster name. HTTP access to InfluxDB is possible, but SFC cannot work with HTTP
   - Optional S3 service for InfluxDB data tiering should also use HTTPS and proper TLS certificates as InfluxDB will reject invalid TLS on HTTPS S3 API endpoint. Among on-premises choices, the [Versity S3 Gateway](https://scaleoutsean.github.io/2023/06/14/versity-s3-posix-gateway.html) has been tested and found to work. MinIO should work as well.
-  - Upstream containers (SFC base image, InfluxDB) are not audited or regularly checked for vulnerabilities by me. SFC doesn't run any external-facing service and InfluxDB is only accessed by Grafana. But feel free to inspect/update them on your own and use your own Influx and Grafana instances. SFC is built with fairly minimal dependencies, so that users can address vulnerabilities in 3rd party packages on their own
-  - All SFC measurements are tagged with the SolidFire cluster name so multiple SFC instances can share the same InfluxDB database if shared access isn't a concern
+  - Upstream containers (SFC base image, InfluxDB) are not audited or checked for vulnerabilities by me. SFC doesn't run any external-facing service and InfluxDB is only accessed by Grafana. But feel free to inspect/update them on your own and use your own Influx and Grafana instances. SFC is built with fairly minimal dependencies, so that users can address vulnerabilities in 3rd party packages on their own
+  - All SFC measurements are tagged with SolidFire cluster name. so multiple SFC instances can share the same InfluxDB database if shared access to same InfluxDB database isn't a concern
 
 ## CA and TLS configuration
 
@@ -245,6 +246,8 @@ Certificate chain
 
 ```
 
+You can find a TLS-generating script in `./certs/_master/` if you don't have your own certificates (you should).
+
 #### Containers
 
 There are two main traps here:
@@ -285,6 +288,8 @@ Grafana 12.1 has a bug which prevents proper loading of custom CAs. That bug was
 
 Within the same Docker Compose, you'd access InfluxDB 3 at `https://influxdb:8181`, use **SQL** (or InfluxQL, if you prefer) query language. Documentation for dashboards and example queries can be found in [DOCUMENTATION](./docs/dashboards.md).
 
+SFC defaults to naming its Data Source "SFC", but v2.1.0 doesn't have any Grafana integration, so you can use whatever Data Source name you want.
+
 ## SolidFire cluster administrator account with only read & reporting access
 
 You can do it from the SolidFire UI, PowerShell Tools, Postman, etc. JSON-RPC request for Postman and such:
@@ -312,40 +317,28 @@ Notes:
 
 ## InfluxDB requirements and data retention
 
-InfluxDB 3 - starting with v3.2 - should be able to make retention configuration easy. Data tiering has been available since 3.0, so you have two options to economize:
+InfluxDB 3 offers several ways to help with data retention:
 
-- Data tiering (available since v3.0). Use any S3 bucket that works with InfluxDB 3
-- Data retention and down-sampling (related features may become available in version 3.2 later this month)
-- Plus some more related to caching (especially if you also tier to S3)
+- Data tiering (available since v3.0). Use any S3 bucket that works with InfluxDB 3. Versity S3 Gateway is included and v2.1.0 features automatic setup of S3 tiering. v2.1.1 reverts to making this optional but Versity S3 Gateway remains in the stack for users with large database requirements
+- Down-sampling (enabled by default for volume performance table since SFC v2.1.1)
 
-Other than that, SFC v2 aims to save resources. Usually SFC idles using 50MB RAM (resident memory size) and 1% of CPU. 
+Other than that, SFC v2 aims to save resources. Usually SFC idles using 50MB RAM (resident memory size) and 1% of CPU.
 
 InfluxDB itself requires north of 1.5 GB RAM for data cache. Data gets quickly evacuated to S3, so local disk consumption is tiny and limited to cache. If you don't want to use S3, simply change InfluxDB object store configuration to `file`.
 
-My single-node SolidFire cluster with close to 30 volumes is fairly representative of many 4-node SolidFire clusters used in NetApp HCI environments. Most have 4 SolidFire nodes (low frequency of collection and fewer metrics than my environment), but many have fewer "(VMware) data stores" i.e. volumes (high-frequency of collection and more metrics). 
+My single-node SolidFire cluster with close to 30 volumes is fairly representative of many 4-node SolidFire clusters used in NetApp HCI environments. Most have 4 SolidFire nodes (low frequency of collection and fewer metrics than my environment), but many have fewer "(VMware) data stores" i.e. volumes (high-frequency of collection and more metrics).
 
-With SFC 2.1.0 running 1,500 iterations (i.e. just over 24 hours) resulted in just 28 MB of data in the S3 bucket to which InfluxDB 3 was tiering. Not too bad!
-
-```sh
-$ du -sh s3_data/influxdb/s169/
-28M	s3_data/influxdb/s169/
-```
-
-SFC v2.0 had 31 day retention, no tiering (InfluxDB 1), and no down-sampling implemented because InfluxDB v1 made that too much trouble (Grafana dashboards also had to be modified, etc.). If you have problems with disk capacity used by InfluxDB 1, you may want to consider SFC v2.1.0.
-
-One important feature that InfluxDB 3 still doesn't have as of v3.3 is data down-sampling for aged data, which would keep data consumption in check and allow us to read less data when we visualize old metrics. SFC doesn't collect a lot of data because this was a problem with InfluxDB v1 as well and that's why since SFC 2.0.0 metrics are gathered on three schedules, but it'd be nice to have.
-
-I have a [post](https://scaleoutsean.github.io/2025/01/24/influxdb-3-core-alpha.html) about InfluxDB from the time it was in alpha. Some things have changed since then, but I've uploaded the post twice, so it's reasonably accurate for version 3.1.
+For most users SFC v2.1.0 shouldn't use more than 200 MB per day. SFC v2.1.1 with SolidFire Demo VM (40 volumes) adds around 30 MB/day using 60s high-frequency interval and - thanks to down-sampling for volume performance table, which one can expand to other tables, 8 weeks of data shouldn't take more than two-three weeks of daily amount.
 
 ## About SFC stack
 
 If you wonder what's what in `docker-compose.yaml`:
 
-- `s3` - Versity S3 Gateway service is used by InfluxDB 3 Core as its back-end tier for almost all data. You can tier InfluxDB data to another place if you want. It is exposed on the host (HTTPS, port 8443) but protected from anonymous access
-- `influxdb` - InfluxDB 3 Core, exposed on a secure port (HTTPS, 8181) and protected from anonymous access
-- `sfc` - SolidFire Collector. Does not provide service on any port.
-- `utils` - container with AWS and InfluxDB utilities if you need to troubleshoot any server. It pre-loads S3 and InfluxDB credentials so you may remove it if you don't want that around. Does not provide service on any port.
-- `grafana` - just for testing, so it uses **HTTP** (port 3000) by default. Users are expected to use own Grafana and connect to InfluxDB on host using HTTPS
+- `influxdb` - InfluxDB 3 Core, exposed on a secure port (HTTPS, 8181) and protected from anonymous access. It stores data on local disk
+- `sfc` - SolidFire Collector. Does not provide service on any port
+- `s3` - Versity S3 Gateway service can be used by InfluxDB 3 Core as its back-end tier for almost all data. You can tier InfluxDB data to another place if you want. It is exposed on the host (HTTPS, port 8443) but protected from anonymous access. If you don't use it, you may remove or disable this container
+- `utils` - container with AWS and InfluxDB utilities if you need to troubleshoot any server. It pre-loads S3 and InfluxDB credentials, but you may remove it if you don't want that around. It does not provide service on any port.
+- `grafana` - just for testing and prototyping, with no pre-loaded dashboards. It uses (**HTTPS**, 3000) by default. Users are expected to use own Grafana and connect to InfluxDB on host using HTTPS/8181
 
 ```sh
 $ docker compose ps 
@@ -361,20 +354,19 @@ utils            sfc-utils            "/entrypoint.sh tail…"   utils      4 ho
 
 ![Example SFC dashboard](./images/sfc-example.png)
 
-SFC v2 does not include ready-made Grafana dashboards but there's a sample dashboard with documented InfluxQL queries and main tables.
+SFC v2 does not include ready-made Grafana dashboards but there are sample dashboards with documented InfluxQL and SQL queries and a list of all tables, fields and tags to make it easier to plan and create dashboards.
 
 See [dashboards.md](./docs/dashboards.md) on how to get started. [dashboard.json](./docs/dashboard.json) contains dashboard code for this sample screenshot (it assumes the InfluxDB source in Grafana is named `sfc`).
 
-
 ## Metrics
 
-HCI Collector suffered from excessive gathering of metrics in terms of both frequency and scope. That caused a variety of problems, perhaps not easy to notice, but still problems:
+HCI Collector suffered from excessive gathering of metrics in terms of both frequency and scope. That caused a variety of problems
 
 - Slow recovery after MVIP fail-over
 - High load on the SolidFire API endpoint
 - Fast metrics database growth
 
-SFC attempts to put and end to that and should be able to handle clusters with 1000 volumes or even more.
+SFC puts an end to that and can handle clusters with 1000 volumes or even more.
 
 - Frequent metrics gathering is limited: several metrics are gathered every 60 seconds. Examples:
   - Account properties - these don't change often, but when they do we wish to know
@@ -382,9 +374,9 @@ SFC attempts to put and end to that and should be able to handle clusters with 1
   - Volume properties - needed for performance monitoring and storage management purposes
   - Volume performance - performance monitoring is one of top use cases
 - Medium and low frequency data: metrics that do not need to be collected every 60 seconds are collected at much higher intervals
-  - Everything else including experimental metrics 
+  - Everything else including experimental metrics
   - **NOTE:** when you build dashboards from these measurements, set dashboard time interval to 60 minutes (or longer) and wait, as you may otherwise see "No data" in Grafana until 61 minutes have passed. Or create a two tiered dashboard system (see [dashboards.md](./docs/dashboards.md) for details)
-- Because of different schedules and tasks, any stuck task (e.g. during MVIP failover) will fail on its own while others may fail or succeed on their own. Before (HCI Collector) a stuck task would stall all metrics gathering
+- Because of different schedules and tasks, any stuck task (e.g. during MVIP fail-over) will fail on its own while others may fail or succeed on their own. Before (HCI Collector) a stuck task would stall all metrics gathering. In SFC v2, only one scheduled task can be active, so even if you're collecting on too short a schedule, failed collections will be logged and no second collection will start until the previous has finished
 
 ## Dependencies
 
