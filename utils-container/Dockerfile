@@ -1,4 +1,6 @@
 FROM debian:trixie-slim
+ENV HOME=/home/influx
+ENV PATH="/home/influx/.influxdb:${PATH}"
 LABEL maintainer="@scaleoutSean"
 
 # Install python and awscli
@@ -17,6 +19,24 @@ RUN mkdir -p /home/influx/.influxdb && \
     tar -xf influxdb3-core-3.4.0_linux_amd64.tar.gz --strip-components=1 -C /home/influx/.influxdb && \
     rm influxdb3-core-3.4.0_linux_amd64.tar.gz
 
+# create influx system user and group, and fix permissions
+RUN groupadd --system influx || true && \
+    useradd --system --home-dir /home/influx --shell /bin/bash --create-home --gid influx influx || true && \
+    chown -R influx:influx /home/influx
+# set home environment to ensure Bash uses correct .bashrc
+ENV HOME=/home/influx
+
+# copy entrypoint and set executable permissions as root
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+# Ensure any interactive bash shell loads InfluxDB env and alias
+RUN echo "shopt -s expand_aliases" >> /etc/bash.bashrc && \
+    echo "alias influx='influxdb3'" >> /etc/bash.bashrc && \
+    echo "[ -f /home/influx/setup.sh ] && source /home/influx/setup.sh" >> /etc/bash.bashrc
+
+# Switch to non-root and start entrypoint
+USER influx
+WORKDIR /home/influx
 ENTRYPOINT ["/entrypoint.sh"]
+

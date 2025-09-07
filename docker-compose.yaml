@@ -112,23 +112,19 @@ services:
       AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
       S3_ENDPOINT: https://s3:7070
       BUCKET: ${S3_BUCKET}
-      CRED_DIR: /influxdb_credentials
+      CRED_DIR: /home/influx
       # InfluxDB3 Environment Variables
-      INFLUX_HOST: influxdb
-      INFLUX_PORT: ${INFLUXDB_PORT}
-      INFLUX_DB: ${INFLUXDB_DB}
-      INFLUXDB3_TLS_CA: /influxdb_certs/ca.crt
-      INFLUXDB3_AUTH_TOKEN_FILE: /influxdb_tokens/sfc.token
+      INFLUXDB3_HOST_URL: https://${INFLUX_HOST:-influxdb}:${INFLUX_PORT:-8181}
+      INFLUXDB3_TLS_CA: /home/influx/ca.crt
+      INFLUXDB3_AUTH_TOKEN_FILE: /home/influx/sfc.token
     networks:
       sfc:
         ipv4_address: ${UTILS_IP}
     volumes:
-      - ./certs/utils:/s3_certs:ro
-      - ./data/influxdb_credentials:/influxdb_credentials/
-      - ./certs/influxdb:/influxdb_certs:ro
-      - ./data/influxdb_tokens:/influxdb_tokens:ro
-      - ./certs/_master/ca.crt:/s3_certs/ca.crt:ro
-      - ./certs/_master/ca.crt:/influxdb_certs/ca.crt:ro
+      - ./certs/_master/ca.crt:/home/influx/ca.crt:ro
+      - ./certs/influxdb/influxdb.crt:/home/influx/influxdb.crt:ro
+      - ./certs/s3/s3.crt:/home/influxdb/s3.crt:ro
+      - ./data/influxdb_tokens/sfc.token:/home/influx/sfc.token:ro
     # No depends_on - utils should be independent for troubleshooting
     command: ["tail","-f","/dev/null"]
 
