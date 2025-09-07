@@ -561,9 +561,9 @@ SELECT mean("ms_since_last_scsi_command") FROM "iscsi_sessions"
 
 This example shows milliseconds since last client's SCSI command, which Windows clients send approximately every 45s-50s. This can be used to find dead clients and unused disks.
 
-![iSCSI connections - time since last SCSI command](../images/sfc-example-dashboard-08-iscsi-connections-seconds-since-last-scsi-command.png)
+![iSCSI connections - time since last SCSI command](../images/sfc-example-dashboard-17-iscsi-connections-seconds-since-last-scsi-command.pn)
 
-There are 2-3 other metrics such as session instance and service ID (could be MD service on SolidFire). Generally these aren't that actionable but may be used to visualize client connectivity across cluster nodes.
+There are 2-3 other metrics such as session instance and service ID (could be a metadata service instance on SolidFire, I reckon). Generally these aren't that actionable but may be used to visualize client connectivity across cluster nodes.
 
 If there are no iSCSI connections, the table aka "measurement" will not be created until iSCSI connections appear and get recorded in the next medium-frequency run.
 
