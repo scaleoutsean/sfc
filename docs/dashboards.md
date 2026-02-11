@@ -392,7 +392,7 @@ SELECT mean("active_sessions") FROM "cluster_capacity"
   GROUP BY time($__interval) fill(null)
 ```
 
-![Cluster capacity - recent IO size](../images/sfc-example-dashboard-03-cluster-capacity-recent-io-size.png)
+![Cluster capacity - recent IO size](../images/sfc-example-dashboard-04-cluster-capacity-recent-io-size.png)
 
 ### Cluster faults (`cluster_faults`)
 
@@ -561,7 +561,7 @@ SELECT mean("ms_since_last_scsi_command") FROM "iscsi_sessions"
 
 This example shows milliseconds since last client's SCSI command, which Windows clients send approximately every 45s-50s. This can be used to find dead clients and unused disks.
 
-![iSCSI connections - time since last SCSI command](../images/sfc-example-dashboard-17-iscsi-connections-seconds-since-last-scsi-command.pn)
+![iSCSI connections - time since last SCSI command](../images/sfc-example-dashboard-17-iscsi-connections-seconds-since-last-scsi-command.png)
 
 There are 2-3 other metrics such as session instance and service ID (could be a metadata service instance on SolidFire, I reckon). Generally these aren't that actionable but may be used to visualize client connectivity across cluster nodes.
 
