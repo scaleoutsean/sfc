@@ -20,6 +20,7 @@ import sys
 from typing import Tuple
 
 USE_SUDO = False
+FORCE_REGENERATE = False
 
 
 def _ensure_dir(path: pathlib.Path):
@@ -51,6 +52,45 @@ def _write_bytes_file(path: pathlib.Path, data: bytes, mode: int = None):
 def _write_text_file(path: pathlib.Path, text: str, mode: int = None):
     _write_bytes_file(path, text.encode("utf-8"), mode=mode)
 
+
+def _extract_cn_from_subj(subj: str, fallback: str = "localhost") -> str:
+    marker = "/CN="
+    if marker not in subj:
+        return fallback
+    return subj.split(marker, 1)[1].strip() or fallback
+
+
+def _build_server_ext_config(common_name: str, dns_names: list, ip_names: list) -> str:
+    lines = [
+        "[req]",
+        "distinguished_name = req_distinguished_name",
+        "x509_extensions = v3_req",
+        "prompt = no",
+        "",
+        "[req_distinguished_name]",
+        f"CN = {common_name}",
+        "",
+        "[v3_req]",
+        "basicConstraints = critical,CA:FALSE",
+        "keyUsage = critical,digitalSignature,keyEncipherment",
+        "extendedKeyUsage = serverAuth",
+        "subjectAltName = @alt_names",
+        "",
+        "[alt_names]",
+    ]
+
+    n = 1
+    for dns in dns_names:
+        lines.append(f"DNS.{n} = {dns}")
+        n += 1
+
+    n = 1
+    for ip in ip_names:
+        lines.append(f"IP.{n} = {ip}")
+        n += 1
+
+    return "\n".join(lines) + "\n"
+
 def create_certificates():
     # Create CA certificates under ./certs/_master/
     dest = pathlib.Path("./certs/_master")
@@ -59,18 +99,35 @@ def create_certificates():
     key_path = dest / "ca.key"
     crt_path = dest / "ca.crt"
 
-    # If they already exist, leave them alone
-    if key_path.exists() and crt_path.exists():
+    # If they already exist, leave them alone unless forced.
+    if key_path.exists() and crt_path.exists() and not FORCE_REGENERATE:
         logging.info("CA key and certificate already exist at %s. Skipping generation.", dest)
         return (key_path, crt_path)
 
-    subj = "/CN=SFC-CA"
     days = "3650"
+    ca_config = dest / "ca_ext.cnf"
 
     try:
         # Generate private key
         logging.info("Generating CA private key: %s", key_path)
         subprocess.run(["openssl", "genrsa", "-out", str(key_path), "4096"], check=True)
+
+        # OpenSSL 3 expects CA certs to carry proper CA/key usage constraints.
+        _write_text_file(ca_config, """
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_ca
+prompt = no
+
+[req_distinguished_name]
+CN = SFC-CA
+
+[v3_ca]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical,CA:true
+keyUsage = critical,keyCertSign,cRLSign
+""")
 
         # Generate self-signed cert
         logging.info("Generating self-signed CA certificate: %s", crt_path)
@@ -87,9 +144,17 @@ def create_certificates():
             days,
             "-out",
             str(crt_path),
-            "-subj",
-            subj,
+            "-config",
+            str(ca_config),
         ], check=True)
+
+        # Reset serial file when CA is regenerated.
+        ca_srl = dest / "ca.srl"
+        if ca_srl.exists():
+            try:
+                ca_srl.unlink()
+            except OSError:
+                pass
 
         # Restrict permissions on private key
         try:
@@ -118,14 +183,14 @@ def gen_sign_csr(dest: pathlib.Path, base_name: str, subj: str, days: str = "365
     if not (ca_key.exists() and ca_crt.exists()):
         create_certificates()
 
-    dest.mkdir(parents=True, exist_ok=True)
+    _ensure_dir(dest)
 
     key_path = dest / f"{base_name}.key"
     csr_path = dest / f"{base_name}.csr"
     cert_path = dest / f"{base_name}.crt"
 
-    # If already present, skip
-    if key_path.exists() and cert_path.exists():
+    # If already present, skip unless forced.
+    if key_path.exists() and cert_path.exists() and not FORCE_REGENERATE:
         logging.info("%s TLS key and certificate already exist. Skipping generation.", base_name)
         return (key_path, cert_path)
 
@@ -133,99 +198,32 @@ def gen_sign_csr(dest: pathlib.Path, base_name: str, subj: str, days: str = "365
     logging.info("Generating %s private key...", base_name)
     subprocess.run(["openssl", "genrsa", "-out", str(key_path), "4096"], check=True)
 
-    if base_name == "s3":
-        # Write SAN config for S3
-        san_config = dest / "s3_san.cnf"
-        _write_text_file(san_config, f"""
-[req]
-distinguished_name = req_distinguished_name
-x509_extensions = v3_req
-prompt = no
+    common_name = _extract_cn_from_subj(subj, fallback=base_name)
+    dns_names = [common_name]
+    ip_names = []
 
-[req_distinguished_name]
-CN = s3
+    if base_name in ("influxdb", "s3", "grafana", "explorer"):
+        dns_names = [base_name, "localhost"]
+        ip_names = ["127.0.0.1"]
 
-[v3_req]
-subjectAltName = @alt_names
+    san_config = dest / f"{base_name}_san.cnf"
+    _write_text_file(san_config, _build_server_ext_config(common_name, dns_names, ip_names))
 
-[alt_names]
-DNS.1 = s3
-""")
-        logging.info("Generating %s CSR with SAN...", base_name)
-        subprocess.run([
-            "openssl", "req", "-new", "-key", str(key_path), "-out", str(csr_path), "-config", str(san_config)
-        ], check=True)
-        logging.info("Signing %s certificate with CA and SAN...", base_name)
-        subprocess.run([
-            "openssl", "x509", "-req", "-in", str(csr_path), "-CA", str(ca_crt), "-CAkey", str(ca_key), "-CAcreateserial",
-            "-out", str(cert_path), "-days", days, "-sha256", "-extensions", "v3_req", "-extfile", str(san_config)
-        ], check=True)
-        try:
-            san_config.unlink()
-        except Exception:
-            pass
-    elif base_name == "influxdb":
-        # Write SAN config for InfluxDB
-        san_config = dest / "influxdb_san.cnf"
-        _write_text_file(san_config, f"""
-[req]
-distinguished_name = req_distinguished_name
-x509_extensions = v3_req
-prompt = no
+    logging.info("Generating %s CSR with SAN extensions...", base_name)
+    subprocess.run([
+        "openssl", "req", "-new", "-key", str(key_path), "-out", str(csr_path), "-config", str(san_config)
+    ], check=True)
 
-[req_distinguished_name]
-CN = influxdb
+    logging.info("Signing %s certificate with CA and SAN extensions...", base_name)
+    subprocess.run([
+        "openssl", "x509", "-req", "-in", str(csr_path), "-CA", str(ca_crt), "-CAkey", str(ca_key), "-CAcreateserial",
+        "-out", str(cert_path), "-days", days, "-sha256", "-extensions", "v3_req", "-extfile", str(san_config)
+    ], check=True)
 
-[v3_req]
-subjectAltName = @alt_names
-
-[alt_names]
-DNS.1 = influxdb
-""")
-        logging.info("Generating %s CSR with SAN...", base_name)
-        subprocess.run([
-            "openssl", "req", "-new", "-key", str(key_path), "-out", str(csr_path), "-config", str(san_config)
-        ], check=True)
-        logging.info("Signing %s certificate with CA and SAN...", base_name)
-        subprocess.run([
-            "openssl", "x509", "-req", "-in", str(csr_path), "-CA", str(ca_crt), "-CAkey", str(ca_key), "-CAcreateserial",
-            "-out", str(cert_path), "-days", days, "-sha256", "-extensions", "v3_req", "-extfile", str(san_config)
-        ], check=True)
-        try:
-            san_config.unlink()
-        except Exception:
-            pass
-    else:
-        logging.info("Generating %s CSR...", base_name)
-        subprocess.run([
-            "openssl",
-            "req",
-            "-new",
-            "-key",
-            str(key_path),
-            "-out",
-            str(csr_path),
-            "-subj",
-            subj,
-        ], check=True)
-        logging.info("Signing %s certificate with CA...", base_name)
-        subprocess.run([
-            "openssl",
-            "x509",
-            "-req",
-            "-in",
-            str(csr_path),
-            "-CA",
-            str(ca_crt),
-            "-CAkey",
-            str(ca_key),
-            "-CAcreateserial",
-            "-out",
-            str(cert_path),
-            "-days",
-            days,
-            "-sha256",
-        ], check=True)    
+    try:
+        san_config.unlink()
+    except Exception:
+        pass
 
     # Restrict permissions on private key
     try:
@@ -512,9 +510,14 @@ if __name__ == "__main__":
         "--use-sudo",
         action="store_true",
         help="Use sudo fallback for file writes when permission errors occur.")
+    parser.add_argument(
+        "--force-regenerate",
+        action="store_true",
+        help="Regenerate certificates even if they already exist (recommended after CA extension changes).")
     args = parser.parse_args()
 
     USE_SUDO = args.use_sudo
+    FORCE_REGENERATE = args.force_regenerate
 
     if args.service == "ca":
         create_certificates()
