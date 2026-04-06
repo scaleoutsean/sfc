@@ -20,6 +20,7 @@
 - Update dependencies (vulnerabilities in aiohttp)
 - Update base container image (Python Alpine)
 - Update 3rd party packages (InfluxDB, InfluxDB UI, Grafana) in Docker Compose
+- Build GHCR container images (note that they can't run with internal certificates as SFC does not have a way to ignore invalid TLS certificates)
 
 ## Changes in v2.1.1
 

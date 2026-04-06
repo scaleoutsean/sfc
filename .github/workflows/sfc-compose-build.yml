@@ -15,6 +15,9 @@ on:
       - ".github/workflows/sfc-compose-build.yml"
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   compose-build-sfc:
     name: compose-build-sfc

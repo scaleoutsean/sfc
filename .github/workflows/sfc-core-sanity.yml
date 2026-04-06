@@ -11,6 +11,9 @@ on:
       - ".github/workflows/sfc-core-sanity.yml"
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   core-sanity:
     name: core-sanity
