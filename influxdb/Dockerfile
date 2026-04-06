@@ -2,7 +2,10 @@ FROM debian:bookworm-slim
 LABEL maintainer="@scaleoutSean"
 
 # Set default InfluxDB3 version (can be overridden at build time)
-ARG INFLUXDB3_BUILD_VERSION=3.3.0
+# Use latest v3 from https://docs.influxdata.com/influxdb3/core/install/
+# https://dl.influxdata.com/influxdb/releases/influxdb3-core-3.9.0_linux_amd64.tar.gz
+ARG INFLUXDB3_BUILD_VERSION=3.9.0
+
 ENV INFLUXDB3_BUILD_VERSION=${INFLUXDB3_BUILD_VERSION}
 
 # Install dependencies for InfluxDB3 and plugin processing

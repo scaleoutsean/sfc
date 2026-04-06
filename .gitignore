@@ -190,3 +190,4 @@ data/**/*
 # Ignore certificate files in sfc/certs/ but keep directory
 sfc/certs/*
 !sfc/certs/.gitkeep
+RELEASE.md

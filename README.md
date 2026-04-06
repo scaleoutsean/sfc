@@ -65,8 +65,8 @@ If using existing InfluxDB, ask the admin for access to a new `sfc` database. By
 Then download, install and run SFC:
 
 ```sh
-# release v2.0.0 uses InfluxDB 1; v2.1.0 uses InfluxDB + S3 tiering
-git clone -b v2.1.1 https://github.com/scaleoutsean/sfc/
+# release v2.0.0 uses InfluxDB 1; v2.1.0+ use InfluxDB + optional S3 tiering
+git clone -b v2.2.0 https://github.com/scaleoutsean/sfc/
 cd sfc/sfc
 python3 -m venv .venv
 source .venv/bin/activate
@@ -97,7 +97,7 @@ Copy `.env.example` to `.env` and modify it for your needs before running `docke
 Pre-built containers **will not work** if your SolidFire and InfluxDB don't have valid public TLS certificates or don't load them when they run. In such cases this below cannot work unless you build the containers yourself and include at least your CA into container image.
 
 ```sh
-docker run --name=sfc docker.io/scaleoutsean/sfc:v2.1.0 --mvip 192.168.1.30 -u monitor -p ********** -ih 192.168.1.146 -ip 8181 -it ${YOUR-INFLUXDB-API-TOKEN} -id sfc
+docker run --name=sfc docker.io/scaleoutsean/sfc:v2.2.0 --mvip 192.168.1.30 -u monitor -p ********** -ih 192.168.1.146 -ip 8181 -it ${YOUR-INFLUXDB-API-TOKEN} -id sfc
 ```
 
 ### `utils` container
@@ -252,7 +252,7 @@ You can find a TLS-generating script in `./certs/_master/` if you don't have you
 
 There are two main traps here:
 
-- Internally within Docker or a Kubernetes namespace, services use orchestrator-internal DNS names. If they're to be accessed externally, TLS must be valid for external FQDN if your service (such as InfluxDB) is supposed to be accessed from SFC running in another namespace
+- Internally, within Docker or a Kubernetes namespace, services use orchestrator-internal DNS names. If they're to be accessed externally, TLS must be valid for external FQDN if your service (such as InfluxDB) is supposed to be accessed from SFC running in another namespace
 - If TLS certificate of the service you're connecting to isn't issued by a well-known CA you need to "load" the CA and IA certificates or embed them into the container
 
 SFC lets you load your own CA certificates, which is why it's possible to load one for Docker-internal and another for SolidFire.
@@ -328,7 +328,7 @@ InfluxDB itself requires north of 1.5 GB RAM for data cache. Data gets quickly e
 
 My single-node SolidFire cluster with close to 30 volumes is fairly representative of many 4-node SolidFire clusters used in NetApp HCI environments. Most have 4 SolidFire nodes (low frequency of collection and fewer metrics than my environment), but many have fewer "(VMware) data stores" i.e. volumes (high-frequency of collection and more metrics).
 
-For most users SFC v2.1.0 shouldn't use more than 200 MB per day. SFC v2.1.1 with SolidFire Demo VM (40 volumes) adds around 30 MB/day using 60s high-frequency interval and - thanks to down-sampling for volume performance table, which one can expand to other tables, 8 weeks of data shouldn't take more than two-three weeks of daily amount.
+For most users SFC v2.1.0+ shouldn't use more than 200 MB per day. SFC v2.1.1 with SolidFire Demo VM (40 volumes) adds around 30 MB/day using 60s high-frequency interval and - thanks to down-sampling for volume performance table, which one can expand to other tables, 8 weeks of data shouldn't take more than two-three weeks of daily amount.
 
 ## About SFC stack
 
@@ -337,7 +337,7 @@ If you wonder what's what in `docker-compose.yaml`:
 - `influxdb` - InfluxDB 3 Core, exposed on a secure port (HTTPS, 8181) and protected from anonymous access. It stores data on local disk
 - `sfc` - SolidFire Collector. Does not provide service on any port
 - `s3` - Versity S3 Gateway service can be used by InfluxDB 3 Core as its back-end tier for almost all data. You can tier InfluxDB data to another place if you want. It is exposed on the host (HTTPS, port 8443) but protected from anonymous access. If you don't use it, you may remove or disable this container
-- `utils` - container with AWS and InfluxDB utilities if you need to troubleshoot any server. It pre-loads S3 and InfluxDB credentials, but you may remove it if you don't want that around. It does not provide service on any port.
+- `utils-container` - container with AWS and InfluxDB utilities if you need to troubleshoot any server. It pre-loads S3 and InfluxDB credentials, but you may remove it if you don't want that around. It does not provide service on any port.
 - `grafana` - just for testing and prototyping, with no pre-loaded dashboards. It uses (**HTTPS**, 3000) by default. Users are expected to use own Grafana and connect to InfluxDB on host using HTTPS/8181
 
 ```sh

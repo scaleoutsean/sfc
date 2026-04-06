@@ -1,0 +1,44 @@
+name: SFC Core Sanity
+
+on:
+  push:
+    paths:
+      - "sfc/**"
+      - ".github/workflows/sfc-core-sanity.yml"
+  pull_request:
+    paths:
+      - "sfc/**"
+      - ".github/workflows/sfc-core-sanity.yml"
+  workflow_dispatch:
+
+jobs:
+  core-sanity:
+    name: core-sanity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r sfc/requirements.txt
+
+      - name: Compile core script
+        run: python -m py_compile sfc/sfc.py
+
+      - name: Validate imports
+        run: |
+          python - <<'PY'
+          import importlib
+
+          importlib.import_module("aiohttp")
+          importlib.import_module("apscheduler")
+          print("SFC core dependency imports succeeded")
+          PY

@@ -1,0 +1,81 @@
+name: SFC GHCR Image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - "sfc/**"
+      - ".env"
+      - ".github/workflows/sfc-ghcr-image.yml"
+  pull_request:
+    paths:
+      - "sfc/**"
+      - ".env"
+      - ".github/workflows/sfc-ghcr-image.yml"
+  workflow_dispatch:
+
+jobs:
+  ghcr-build:
+    name: ghcr-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load build args from .env
+        id: build_args
+        run: |
+          set -euo pipefail
+          for key in PYTHON_VERSION PYTHON_DIGEST APSCHEDULER_VERSION AIOHTTP_VERSION; do
+            value="$(grep -E "^${key}=" .env | head -n1 | cut -d= -f2- || true)"
+            if [[ -z "$value" ]]; then
+              echo "Required key '$key' is missing from .env" >&2
+              exit 1
+            fi
+            echo "${key}=${value}" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/sfc
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and optionally push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./sfc
+          file: ./sfc/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PYTHON_VERSION=${{ steps.build_args.outputs.PYTHON_VERSION }}
+            PYTHON_DIGEST=${{ steps.build_args.outputs.PYTHON_DIGEST }}
+            APSCHEDULER_VERSION=${{ steps.build_args.outputs.APSCHEDULER_VERSION }}
+            AIOHTTP_VERSION=${{ steps.build_args.outputs.AIOHTTP_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

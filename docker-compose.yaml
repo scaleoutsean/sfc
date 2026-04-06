@@ -70,11 +70,13 @@ services:
   sfc:
     image: sfc/sfc:latest
     build:
-      context: sfc
+      context: ./sfc
       dockerfile: Dockerfile
       args:
         PYTHON_VERSION: ${PYTHON_VERSION}
         PYTHON_DIGEST: ${PYTHON_DIGEST}
+        APSCHEDULER_VERSION: ${APSCHEDULER_VERSION:-3.11.2}
+        AIOHTTP_VERSION: ${AIOHTTP_VERSION:-3.13.5}
     container_name: sfc
     command: ["--no-instrumenting"]
     environment:

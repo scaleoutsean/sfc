@@ -8,7 +8,7 @@
     - [1. Dockerfile `ARG`s](#1-dockerfile-args)
     - [2. Docker compose build args](#2-docker-compose-build-args)
     - [3. Additional instances](#3-additional-instances)
-  - [Smart down-sampling (v2.1.1)](#smart-down-sampling-v211)
+  - [Smart down-sampling (v2.1.1+)](#smart-down-sampling-v211)
     - [Features](#features)
     - [Configuration](#configuration)
     - [Customization](#customization)
@@ -26,14 +26,14 @@ Copy `.env.example` to `.env` and edit it. You mostly need to only change the cr
 
 ### Build-time versions (used as `ARG`s in Dockerfiles)
 
-- `INFLUXDB3_BUILD_VERSION=3.3.0` - InfluxDB3 Core binary version for download
-- `VERSITY_S3GW_VERSION=1.0.14` - Versity S3 Gateway version (leave as is if you don't use S3 tiering)
-- `PYTHON_VERSION=3.12.11-alpine3.22` - Python base image version
+- `INFLUXDB3_BUILD_VERSION=3.9.0` - InfluxDB3 Core binary version for download
+- `VERSITY_S3GW_VERSION=1.4.0` - Versity S3 Gateway version (leave as is if you don't use S3 tiering)
+- `PYTHON_VERSION=3.15.0a7-alpine3.22` - Python base image version
 - `PYTHON_DIGEST=sha256:...` - Python image digest for extra security
 
 ### Runtime versions (used in docker-compose services)
 
-- `INFLUXDB3_VERSION=3-core` - InfluxDB3 image tag
+- `INFLUXDB3_VERSION=3-core` - InfluxDB3 image tag (although we tend to build from scratch as that's the easiest way to automate admin account creation)
 - `GRAFANA_VERSION=latest` - Grafana image tag (if set, use 12.2 or newer due to TLS CA bug in previous versions)
 
 ## How it works
@@ -44,13 +44,13 @@ Each Dockerfile declares `ARG` variables with defaults:
 
 ```dockerfile
 # s3/Dockerfile
-ARG VERSITY_S3GW_VERSION=1.0.14
+ARG VERSITY_S3GW_VERSION=1.4.0
 
 # influxdb/Dockerfile  
-ARG INFLUXDB3_BUILD_VERSION=3.3.0
+ARG INFLUXDB3_BUILD_VERSION=3.9.0
 
 # sfc/Dockerfile
-ARG PYTHON_VERSION=3.12.11-alpine3.22
+ARG PYTHON_VERSION=3.15.0a7-alpine3.22
 ARG PYTHON_DIGEST=sha256:...
 ```
 
@@ -87,7 +87,7 @@ Multiple collectors can use own databases on the same InfluxDB servers ('sfc-PRO
 
 Note that if you don't have InfluxDB administrator key and use user or "named" key, you may need the administrator to create a database for you. SFC tries to create the specified database, but if token permissions aren't sufficient then it will fail to do that.
 
-## Smart down-sampling (v2.1.1)
+## Smart down-sampling (v2.1.1+)
 
 SFC v2.1.1 includes an embedded smart data lifecycle management system using the official InfluxDB3 down-sampling plugin. This "stored procedures" architecture provides zero-dependency down-sampling with production defaults.
 
@@ -144,9 +144,9 @@ To build with custom versions:
 vim .env
 
 # Option 2: Override at build time
-PYTHON_VERSION=3.12.12-alpine3.22 docker-compose build sfc
+PYTHON_VERSION=3.15.0a7-alpine3.22 docker-compose build sfc
 
 # Option 3: Environment override
-export INFLUXDB3_BUILD_VERSION=3.4.0
+export INFLUXDB3_BUILD_VERSION=3.9.0
 docker-compose build influxdb
 ```

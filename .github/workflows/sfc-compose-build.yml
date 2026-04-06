@@ -1,0 +1,30 @@
+name: SFC Compose Build
+
+on:
+  push:
+    paths:
+      - "sfc/**"
+      - "docker-compose.yaml"
+      - ".env"
+      - ".github/workflows/sfc-compose-build.yml"
+  pull_request:
+    paths:
+      - "sfc/**"
+      - "docker-compose.yaml"
+      - ".env"
+      - ".github/workflows/sfc-compose-build.yml"
+  workflow_dispatch:
+
+jobs:
+  compose-build-sfc:
+    name: compose-build-sfc
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build SFC service via Compose
+        run: docker compose build sfc

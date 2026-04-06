@@ -4,7 +4,7 @@
 
 ###############################################################################
 # Synopsis:                                                                   #
-# SFC v2.1 schedules and executes gathering of SolidFire API object           #
+# SFC v2.2 schedules and executes gathering of SolidFire API object           #
 #  properties and performance metrics, enriches obtained data and stores them # 
 #  in InfluxDB 3 for visualization and data analytics                         #
 #                                                                             #
@@ -46,7 +46,7 @@ os.environ["PYTHONWARNINGS"] = "default"
 
 # =============== default vars ================================================
 
-VERSION = '2.1.1'
+VERSION = '2.2.0'
 
 # Create reporting-only admin user with read-only access to the SolidFire API.
 # Modify these five variables to match your environment if you want hardcoded

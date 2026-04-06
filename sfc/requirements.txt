@@ -1,5 +1,5 @@
 # APScheduler job scheduler
-apscheduler==3.13.5
+apscheduler==3.11.2
 # Fast HTTP client with speedups
 aiohttp[speedups]==3.13.5
 # Linux distribution info for CA handling

@@ -1,6 +1,7 @@
 # Change Log
 
 - [Change Log](#change-log)
+  - [Changes in v2.2.0](#changes-in-v220)
   - [Changes in v2.1.1](#changes-in-v211)
   - [Changes in v2.1.0](#changes-in-v210)
   - [Changes in v2.0.0](#changes-in-v200)
@@ -13,6 +14,12 @@
   - [Changes in .3](#changes-in-3)
   - [Changes in .v2](#changes-in-v2)
   - [Changes in .v1](#changes-in-v1)
+
+## Changes in v2.2.0
+
+- Update dependencies (vulnerabilities in aiohttp)
+- Update base container image (Python Alpine)
+- Update 3rd party packages (InfluxDB, InfluxDB UI, Grafana) in Docker Compose
 
 ## Changes in v2.1.1
 
