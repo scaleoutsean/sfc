@@ -119,7 +119,9 @@ For the entire stack (InfluxDB, SFC...), prepare `.env` file and certificates:
 
 # Docker services can't start without TLS certificates, so use the above or BOYCerts and copy to appropriate paths 
 docker compose up 
-# Watch for API token from InfluxDB and store it carefully because it can't be recovered (any v3, as of 3.9.0)
+# IMPORTANT:
+# Watch the influxdb DB log for API token and store it carefully because it can't be recovered (any v3, as of 3.9.0).
+# It should be saved on disk as well, but just in case. Also, you can remove it from disk and load from secrets or other place.
 ```
 
 ### 'influxdb' container
@@ -166,7 +168,7 @@ InfluxDB 3 UI is a very nice UI for InfluxDB 3 Core. By default, Docker Compose 
 
 ![TLS required](./images/sfc-influxdb-explorer.png)
 
-If TLS certificates are correctly deployed and Explorer then built, you should be able to connect to `https://influxdb:8181` (not `localhost`, and not `:8086`) in the same Docker Compose stack. You'll need that (or other) valid token from your InfluxDB instance.
+If TLS certificates are correctly deployed and Explorer container then built and started, connect to `https://influxdb:8181` (not `localhost`, and not `:8086`) in the same Docker Compose stack. You'll need that (or other) valid token from your InfluxDB instance.
 
 ![Configure SFC](./images/sfc-influxdb-explorer_configured.png)
 
@@ -175,8 +177,7 @@ If TLS certificates are correctly deployed and Explorer then built, you should b
 After we descend to the `sfc` directory, create a Python virtual environment and install modules from `sfc/requirements.txt`:
 
 ```sh
-usage: sfc.py [-h] [-m [MVIP]] [-u USERNAME] [-p PASSWORD] [-ih [INFLUXDB_HOST]] [-ip [INFLUXDB_PORT]] [-id [INFLUXDB_NAME]] [-it [INFLUXDB_TOKEN]] [-fh [HI]] [-fm [MED]] [-fl [LO]] [-ex]
-              [-ll [{DEBUG,INFO,WARNING,ERROR,CRITICAL}]] [-lf [LOGFILE]] [-c CA_CHAIN] [--insecure-sf] [--no-instrumenting] [-v]
+usage: sfc.py [-h] [-m [MVIP]] [-u USERNAME] [-p PASSWORD] [-ih [INFLUXDB_HOST]] [-ip [INFLUXDB_PORT]] [-id [INFLUXDB_NAME]] [-it [INFLUXDB_TOKEN]] [-fh [HI]] [-fm [MED]] [-fl [LO]] [-ex] [-ll [{DEBUG,INFO,WARNING,ERROR,CRITICAL}]] [-lf [LOGFILE]] [-c CA_CHAIN] [--insecure-sf] [--no-instrumenting] [-v]
 
 Collects SolidFire metrics and sends them to InfluxDB.
 
