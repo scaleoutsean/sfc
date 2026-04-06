@@ -14,12 +14,47 @@ import os
 import pathlib
 import subprocess
 import logging
+import re
+import ssl
+import sys
 from typing import Tuple
+
+USE_SUDO = False
+
+
+def _ensure_dir(path: pathlib.Path):
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        if not USE_SUDO:
+            raise
+        subprocess.run(["sudo", "mkdir", "-p", str(path)], check=True)
+
+
+def _write_bytes_file(path: pathlib.Path, data: bytes, mode: int = None):
+    try:
+        _ensure_dir(path.parent)
+        path.write_bytes(data)
+        if mode is not None:
+            os.chmod(str(path), mode)
+        return
+    except PermissionError:
+        if not USE_SUDO:
+            raise
+
+    _ensure_dir(path.parent)
+    subprocess.run(["sudo", "tee", str(path)], input=data, stdout=subprocess.DEVNULL, check=True)
+    if mode is not None:
+        subprocess.run(["sudo", "chmod", format(mode, "o"), str(path)], check=True)
+
+
+def _write_text_file(path: pathlib.Path, text: str, mode: int = None):
+    _write_bytes_file(path, text.encode("utf-8"), mode=mode)
 
 def create_certificates():
     # Create CA certificates under ./certs/_master/
     dest = pathlib.Path("./certs/_master")
-    dest.mkdir(parents=True, exist_ok=True)
+    _ensure_dir(dest)
 
     key_path = dest / "ca.key"
     crt_path = dest / "ca.crt"
@@ -101,7 +136,7 @@ def gen_sign_csr(dest: pathlib.Path, base_name: str, subj: str, days: str = "365
     if base_name == "s3":
         # Write SAN config for S3
         san_config = dest / "s3_san.cnf"
-        san_config.write_text(f"""
+        _write_text_file(san_config, f"""
 [req]
 distinguished_name = req_distinguished_name
 x509_extensions = v3_req
@@ -132,7 +167,7 @@ DNS.1 = s3
     elif base_name == "influxdb":
         # Write SAN config for InfluxDB
         san_config = dest / "influxdb_san.cnf"
-        san_config.write_text(f"""
+        _write_text_file(san_config, f"""
 [req]
 distinguished_name = req_distinguished_name
 x509_extensions = v3_req
@@ -199,7 +234,7 @@ DNS.1 = influxdb
         logging.debug("Failed to chmod %s private key; continuing.", base_name)
 
     # Copy CA public cert (binary-safe)
-    (dest / "ca.crt").write_bytes(ca_crt.read_bytes())
+    _write_bytes_file(dest / "ca.crt", ca_crt.read_bytes())
 
     # Clean up CSR
     try:
@@ -231,8 +266,7 @@ def create_influxdb_config():
         f"tls_key_file = {str(key_path)}\n"
         f"tls_ca_file = {str(dest / 'ca.crt')}\n"
     )
-    with open(str(conf_path), "w", encoding="utf-8") as fh:
-        fh.write(conf_text)
+    _write_text_file(conf_path, conf_text)
 
     logging.info("InfluxDB TLS material created at %s", str(dest))
     return (key_path, cert_path)
@@ -256,8 +290,7 @@ def create_s3_config():
         f"tls_key = {str(key_path)}\n"
         f"tls_ca = {str(dest / 'ca.crt')}\n"
     )
-    with open(str(conf_path), "w", encoding="utf-8") as fh:
-        fh.write(conf_text)
+    _write_text_file(conf_path, conf_text)
 
     logging.info("S3 TLS material created at %s", str(dest))
     return (key_path, cert_path)
@@ -281,8 +314,7 @@ def create_grafana_config():
         f"cert_key = {str(key_path)}\n"
         f"ca_file = {str(dest / 'ca.crt')}\n"
     )
-    with open(str(conf_path), "w", encoding="utf-8") as fh:
-        fh.write(conf_text)
+    _write_text_file(conf_path, conf_text)
 
     logging.info("Grafana TLS material created at %s", str(dest))
     return (key_path, cert_path)
@@ -299,7 +331,7 @@ def create_explorer_config():
         create_certificates()
 
     dest = pathlib.Path("./certs/explorer")
-    dest.mkdir(parents=True, exist_ok=True)
+    _ensure_dir(dest)
 
     # Generate with expected InfluxDB3 Explorer names
     key_path = dest / "key.pem"
@@ -314,7 +346,7 @@ def create_explorer_config():
             if ca_crt.exists():
                 # Create fullchain.pem = cert + CA
                 fullchain_content = cert_path.read_text() + "\n" + ca_crt.read_text()
-                fullchain_path.write_text(fullchain_content)
+                _write_text_file(fullchain_path, fullchain_content)
                 logging.info("Created fullchain.pem for Explorer")
         return (key_path, cert_path)
 
@@ -328,7 +360,7 @@ def create_explorer_config():
     # Create fullchain.pem (cert + CA chain) for Explorer compatibility
     if ca_crt.exists():
         fullchain_content = cert_path.read_text() + "\n" + ca_crt.read_text()
-        fullchain_path.write_text(fullchain_content)
+        _write_text_file(fullchain_path, fullchain_content)
         logging.info("Created fullchain.pem for Explorer")
 
     conf_path = dest / "explorer_tls.conf"
@@ -339,8 +371,7 @@ def create_explorer_config():
         f"fullchain_file = {str(fullchain_path)}\n"
         f"ca_file = {str(dest / 'ca.crt')}\n"
     )
-    with open(str(conf_path), "w", encoding="utf-8") as fh:
-        fh.write(conf_text)
+    _write_text_file(conf_path, conf_text)
 
     logging.info("InfluxDB Explorer TLS material created at %s", str(dest))
     return (key_path, cert_path)
@@ -351,25 +382,145 @@ def copy_ca_to_all():
     src = pathlib.Path("./certs/_master/ca.crt")
     for service in ["s3", "influxdb", "grafana", "sfc", "utils", "explorer"]:
         dst = pathlib.Path(f"./certs/{service}/ca.crt")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_bytes(src.read_bytes())
+        _ensure_dir(dst.parent)
+        _write_bytes_file(dst, src.read_bytes())
 
     # Keep legacy Docker build context input in sync for influxdb/Dockerfile:
     # COPY ./ca.crt /home/influxdb3/certs/ca.crt
     legacy_influxdb_ca = pathlib.Path("./influxdb/ca.crt")
-    legacy_influxdb_ca.parent.mkdir(parents=True, exist_ok=True)
-    legacy_influxdb_ca.write_bytes(src.read_bytes())
+    _ensure_dir(legacy_influxdb_ca.parent)
+    _write_bytes_file(legacy_influxdb_ca, src.read_bytes())
     return
+
+
+def _parse_solidfire_host_and_port(user_input: str) -> Tuple[str, int]:
+    value = user_input.strip()
+    if not value:
+        raise ValueError("SolidFire host input is empty")
+
+    # Accept inputs like:
+    # - 192.168.1.34
+    # - sf.example.local
+    # - 192.168.1.34:443
+    # - https://sf.example.local:8443
+    if "://" in value:
+        from urllib.parse import urlparse
+        parsed = urlparse(value)
+        if not parsed.hostname:
+            raise ValueError(f"Could not parse host from input: {user_input}")
+        host = parsed.hostname
+        port = parsed.port or 443
+        return host, port
+
+    if value.count(":") == 1 and not value.startswith("["):
+        host_part, port_part = value.split(":", 1)
+        if host_part and port_part.isdigit():
+            return host_part, int(port_part)
+
+    return value, 443
+
+
+def _safe_cert_filename(host: str) -> str:
+    # Keep cert filenames portable and predictable.
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", host.strip())
+    return safe or "solidfire"
+
+
+def maybe_download_solidfire_certificate(download_mode: str = "auto", solidfire_host: str = ""):
+    """Optionally download SolidFire endpoint certificate and store it for SFC trust use.
+
+    Stores cert in:
+    - ./certs/solidfire/<fqdn-or-ip>.crt (reference archive)
+    - ./sfc/certs/<fqdn-or-ip>.crt (picked up during sfc image build)
+    - ./sfc/certs/sf_ca.crt (stable SFC filename)
+    - ./certs/sfc/sf_ca.crt (runtime volume-mount path used by compose)
+    """
+    mode = (download_mode or "auto").strip().lower()
+    endpoint = (solidfire_host or "").strip()
+
+    if mode not in ("auto", "yes", "no"):
+        logging.warning("Invalid --download-solidfire-cert value '%s'. Using 'auto'.", download_mode)
+        mode = "auto"
+
+    if mode == "no":
+        logging.info("Skipped SolidFire certificate download (--download-solidfire-cert=no).")
+        return
+
+    if not endpoint:
+        if mode == "yes":
+            if not sys.stdin.isatty():
+                logging.warning("--download-solidfire-cert=yes set without --solidfire-host in non-interactive mode; skipping download.")
+                return
+            endpoint = input("SolidFire host or URL (example: 192.168.1.34 or https://sf.example.local:443): ").strip()
+        else:
+            if not sys.stdin.isatty():
+                logging.info("Non-interactive session detected. Skipping optional SolidFire cert download.")
+                return
+            answer = input("Do you want to download certificate from SolidFire (n/Y): ").strip().lower()
+            if answer in ("n", "no"):
+                logging.info("Skipped SolidFire certificate download by user choice.")
+                return
+            endpoint = input("SolidFire host or URL (example: 192.168.1.34 or https://sf.example.local:443): ").strip()
+
+    if not endpoint:
+        logging.warning("No SolidFire host provided. Skipping SolidFire certificate download.")
+        return
+
+    try:
+        host, port = _parse_solidfire_host_and_port(endpoint)
+        pem_data = ssl.get_server_certificate((host, port))
+    except Exception as exc:
+        logging.error("Failed to download SolidFire certificate from %s: %s", endpoint, exc)
+        return
+
+    cert_name = _safe_cert_filename(host) + ".crt"
+
+    certs_solidfire_dir = pathlib.Path("./certs/solidfire")
+    _ensure_dir(certs_solidfire_dir)
+    solidfire_cert_path = certs_solidfire_dir / cert_name
+    _write_text_file(solidfire_cert_path, pem_data)
+
+    # Keep SFC build context trust files in sync.
+    sfc_build_certs_dir = pathlib.Path("./sfc/certs")
+    _ensure_dir(sfc_build_certs_dir)
+    _write_text_file(sfc_build_certs_dir / cert_name, pem_data)
+    _write_text_file(sfc_build_certs_dir / "sf_ca.crt", pem_data)
+
+    # Keep compose runtime mount path in sync.
+    sfc_runtime_certs_dir = pathlib.Path("./certs/sfc")
+    _ensure_dir(sfc_runtime_certs_dir)
+    _write_text_file(sfc_runtime_certs_dir / "sf_ca.crt", pem_data)
+
+    logging.info("Saved SolidFire certificate to %s", solidfire_cert_path)
+    logging.info("Synced SolidFire trust cert to ./sfc/certs/sf_ca.crt and ./certs/sfc/sf_ca.crt")
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generate CA and per-service TLS certificates.")
-    parser.add_argument("--service", choices=["all", "s3", "influxdb", "grafana", "explorer", "ca"], default="all", help="Which certs to generate")
+    parser.add_argument("--service", choices=["all", "s3", "influxdb", "grafana", "explorer", "ca", "solidfire"], default="all", help="Which certs to generate")
+    parser.add_argument(
+        "--download-solidfire-cert",
+        choices=["auto", "yes", "no"],
+        default="auto",
+        help="Download SolidFire endpoint cert: auto=interactive prompt, yes=force download, no=skip.")
+    parser.add_argument(
+        "--solidfire-host",
+        default="",
+        help="SolidFire host or URL for certificate download (e.g. 192.168.1.34 or https://sf.example.local:443).")
+    parser.add_argument(
+        "--use-sudo",
+        action="store_true",
+        help="Use sudo fallback for file writes when permission errors occur.")
     args = parser.parse_args()
+
+    USE_SUDO = args.use_sudo
 
     if args.service == "ca":
         create_certificates()
+    elif args.service == "solidfire":
+        # SolidFire trust cert bootstrap only; avoids touching other service directories.
+        pass
     elif args.service == "s3":
         create_s3_config()
         copy_ca_to_all()
@@ -387,3 +538,6 @@ if __name__ == "__main__":
         create_grafana_config()
         create_explorer_config()
         copy_ca_to_all()
+
+    # Optional SolidFire trust certificate bootstrap for SFC.
+    maybe_download_solidfire_certificate(args.download_solidfire_cert, args.solidfire_host)

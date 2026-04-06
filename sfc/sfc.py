@@ -59,6 +59,7 @@ INFLUXDB3_AUTH_TOKEN = None  # Will be loaded from file or environment variable 
 SF_MVIP = '192.168.1.34'
 SF_USERNAME = 'admin'
 SF_PASSWORD = '.....'
+SF_VERIFY_SSL = True  # SolidFire TLS verification; keep enabled by default
 
 # TLS certificates for SolidFire API:
 # https://docs.aiohttp.org/en/stable/client_advanced.html#example-use-self-signed-certificate
@@ -99,6 +100,25 @@ sf_headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
 # InfluxDB headers (Bearer token will be set after token is loaded)
 influx_headers = {'Accept': 'application/json', 'Accept-Encoding': 'deflate, gzip;q=1.0, *;q=0.5',
                   'Content-Type': 'application/json'}
+
+
+def _bool_from_env(var_name: str, default: bool = True) -> bool:
+    raw = os.environ.get(var_name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in ('1', 'true', 'yes', 'y', 'on'):
+        return True
+    if value in ('0', 'false', 'no', 'n', 'off'):
+        return False
+    return default
+
+
+def sf_ssl_for_connector():
+    # aiohttp TCPConnector accepts ssl=False to disable certificate verification.
+    if SF_VERIFY_SSL:
+        return ssl.create_default_context()
+    return False
 
 
 async def sf_api_post(session, url, payload, auth):
@@ -2199,10 +2219,8 @@ async def hi_freq_tasks(auth):
         " of high-frequency tasks. Timestamp: " + str(CURRENT_TIMESTAMP) + 
         " (will be used by all tasks in this cycle)")
     
-    # Create SSL context for SolidFire connections
-    ssl_context = ssl.create_default_context()
     session = aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=ssl_context, enable_cleanup_closed=True), 
+        connector=aiohttp.TCPConnector(ssl=sf_ssl_for_connector(), enable_cleanup_closed=True), 
         headers=sf_headers
     )
     task_list = [cluster_faults, cluster_performance,
@@ -2227,9 +2245,8 @@ async def med_freq_tasks(auth):
     Run medium-frequency (5-30 min interval) tasks for less time-sensitive operation data.
     """
     time_start = round(time.time(), 3)
-    ssl_context = ssl.create_default_context()
     session = aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=ssl_context, enable_cleanup_closed=True, timeout_ceil_threshold=15), 
+        connector=aiohttp.TCPConnector(ssl=sf_ssl_for_connector(), enable_cleanup_closed=True, timeout_ceil_threshold=15), 
         headers=sf_headers
     )
     task_list = [accounts, cluster_capacity, iscsi_sessions, volumes]
@@ -2253,9 +2270,8 @@ async def lo_freq_tasks(auth):
     Run low-frequency (0.5-3 hour interval) tasks for non-time-sensitive metrics and events.
     """
     time_start = round(time.time(), 3)
-    ssl_context = ssl.create_default_context()
     session = aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=ssl_context, enable_cleanup_closed=True, timeout_ceil_threshold=30), 
+        connector=aiohttp.TCPConnector(ssl=sf_ssl_for_connector(), enable_cleanup_closed=True, timeout_ceil_threshold=30), 
         headers=sf_headers
     )
     task_list = [account_efficiency, cluster_version,
@@ -2280,9 +2296,8 @@ async def experimental(auth):
     Runs one or more medium-frequency and experimental collector tasks.
     """
     time_start = round(time.time(), 3)
-    ssl_context = ssl.create_default_context()
     session = aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=ssl_context, enable_cleanup_closed=True, timeout_ceil_threshold=20), 
+        connector=aiohttp.TCPConnector(ssl=sf_ssl_for_connector(), enable_cleanup_closed=True, timeout_ceil_threshold=20), 
         headers=sf_headers
     )
     task_list = [schedules, snapshot_groups, volume_qos_histograms]
@@ -2307,9 +2322,8 @@ async def get_cluster_name(auth):
     """
     time_start = round(time.time(), 3)
     url = SF_URL + SF_JSON_PATH + '?method=GetClusterInfo'
-    ssl_context = ssl.create_default_context()
     async with aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=ssl_context, force_close=True, enable_cleanup_closed=True), 
+        connector=aiohttp.TCPConnector(ssl=sf_ssl_for_connector(), force_close=True, enable_cleanup_closed=True), 
         headers=sf_headers, 
         auth=auth
     ) as session:
@@ -2379,7 +2393,11 @@ async def run_all_sf_tasks(auth):
     """
     Create dedicated session for SolidFire API calls with correct auth and headers, and run all SF tasks.
     """
-    async with aiohttp.ClientSession(auth=auth, headers=sf_headers) as session:
+    async with aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(ssl=sf_ssl_for_connector(), enable_cleanup_closed=True),
+        auth=auth,
+        headers=sf_headers
+    ) as session:
         task_list = [
             cluster_faults,
             cluster_performance,
@@ -2526,6 +2544,11 @@ if __name__ == '__main__':
         default=os.environ.get('CA_CHAIN'),
         required=False,
         help='Optional CA certificate file(s) to be copied to the Ubuntu/Debian/Alpine OS certificate store. For multiple files, separate with commas (e.g., "ca1.crt,ca2.crt"). Can be set via CA_CHAIN environment variable. Users of other systems may import manually. Default: None')
+    parser.add_argument(
+        '--insecure-sf',
+        action='store_true',
+        required=False,
+        help='Disable TLS certificate verification for SolidFire API calls (insecure). Prefer using trusted CA certificates instead.')
     parser.add_argument('--no-instrumenting', action='store_true', required=False,
                         help='Disable function performance instrumentation to improve collection speed when InfluxDB writes are slow.')
     parser.add_argument('-v', '--version', action='store_true', required=False,
@@ -2658,6 +2681,16 @@ if __name__ == '__main__':
         logging.warning('Function performance instrumentation disabled (--no-instrumenting flag active)')
     else:
         logging.info('Function performance instrumentation enabled')
+
+    # SolidFire TLS verification policy: default secure, opt-out only.
+    SF_VERIFY_SSL = _bool_from_env('SF_VERIFY_SSL', True)
+    if args.insecure_sf:
+        SF_VERIFY_SSL = False
+
+    if SF_VERIFY_SSL:
+        logging.info('SolidFire TLS verification is enabled.')
+    else:
+        logging.warning('SolidFire TLS verification is DISABLED (insecure mode).')
 
     # Check if running in a container
     def is_running_in_container():

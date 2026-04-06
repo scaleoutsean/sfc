@@ -71,6 +71,7 @@ cd sfc/sfc
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
+
 # With InfluxDB 3 at https://192.168.1.146:8181, valid TLS certs on SF and InfluxDB,
 #   InfluxDB database 'sfc' will be automatically created by SFC if InfluxDB Admin Token is valid 
 #   and Influx database 'sfc' does not exist. HTTPS is assumed.
@@ -94,10 +95,28 @@ Feel free to modify or build your own with `sfc.py` in it.
 
 Copy `.env.example` to `.env` and modify it for your needs before running `docker compose build`.
 
-Pre-built containers **will not work** if your SolidFire and InfluxDB don't have valid public TLS certificates or don't load them when they run. In such cases this below cannot work unless you build the containers yourself and include at least your CA into container image.
+SFC verifies SolidFire TLS certificates by default. As a temporary workaround only, you can disable verification by setting `SF_VERIFY_SSL=false` in `.env` (Docker Compose), or by passing `--insecure-sf` to `sfc.py`. The main use case for this is for users who want to try `docker pull ghcr.io/scaleoutsean/sfc/sfc:latest` which naturally cannot validate internal CAs.
+
+Pre-built containers **will not work** by default if your SolidFire and InfluxDB don't have valid public TLS certificates or don't load them when they run. In such cases this below cannot work unless you build the containers yourself and include at least your CA into container image.
 
 ```sh
 docker run --name=sfc docker.io/scaleoutsean/sfc:v2.2.0 --mvip 192.168.1.30 -u monitor -p ********** -ih 192.168.1.146 -ip 8181 -it ${YOUR-INFLUXDB-API-TOKEN} -id sfc
+```
+
+For the entire stack (InfluxDB, SFC...), prepare `.env` file and certificates:
+
+```sh
+# Container users may generate TLS certificates and download one from the SolidFire API in one go:
+./certs/_master/gen_ca_tls_certs.py \
+  --service all \
+  --download-solidfire-cert yes \
+  --solidfire-host 192.168.1.34 \
+  --use-sudo
+# Alternatively, if you want to copy by yourself or the SolidFire TLS can be validated:
+# python3 certs/_master/gen_ca_tls_certs.py --service all --download-solidfire-cert no
+
+# Docker services can't start without TLS certificates, so use the above or BOYCerts and copy to appropriate paths 
+docker compose up -d
 ```
 
 ### `utils` container
@@ -125,8 +144,7 @@ $ docker-compose exec utils bash -c 'TOKEN=$(cat /influxdb_tokens/sfc.token) && 
 After we descend to the `sfc` directory, create a Python virtual environment and install modules from `sfc/requirements.txt`:
 
 ```sh
-usage: sfc.py [-h] [-m [MVIP]] [-u USERNAME] [-p PASSWORD] [-ih [INFLUXDB_HOST]] [-ip [INFLUXDB_PORT]] [-id [INFLUXDB_NAME]] [-it [INFLUXDB_TOKEN]] [-fh [HI]] [-fm [MED]] [-fl [LO]] [-ex]
-              [-ll [{DEBUG,INFO,WARNING,ERROR,CRITICAL}]] [-lf [LOGFILE]] [-c CA_CHAIN] [--no-instrumenting] [-v]
+usage: sfc.py [-h] [-m [MVIP]] [-u USERNAME] [-p PASSWORD] [-ih [INFLUXDB_HOST]] [-ip [INFLUXDB_PORT]] [-id [INFLUXDB_NAME]] [-it [INFLUXDB_TOKEN]] [-fh [HI]] [-fm [MED]] [-fl [LO]] [-ex] [-ll [{DEBUG,INFO,WARNING,ERROR,CRITICAL}]] [-lf [LOGFILE]] [-c CA_CHAIN] [--no-instrumenting] [-v]
 
 Collects SolidFire metrics and sends them to InfluxDB.
 

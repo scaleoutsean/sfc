@@ -31,7 +31,7 @@ LABEL maintainer="@scaleoutSean"
 RUN apk add --no-cache ca-certificates libffi
 
 # Copy CA certificates and install them to Alpine certificate store
-# The certificates will be copied from the build context
+# The certificates will be copied from the build context (not top level ./certs!)
 COPY certs/ /usr/local/share/ca-certificates/
 RUN update-ca-certificates
 

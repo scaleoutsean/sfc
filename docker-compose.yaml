@@ -93,6 +93,7 @@ services:
       SF_MVIP: ${SF_MVIP}
       SF_USERNAME: ${SF_USERNAME}
       SF_PASSWORD: ${SF_PASSWORD}
+      SF_VERIFY_SSL: ${SF_VERIFY_SSL:-true}
     depends_on:
       - influxdb
     volumes:
