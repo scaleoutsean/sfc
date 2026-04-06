@@ -348,11 +348,17 @@ def create_explorer_config():
 
 def copy_ca_to_all():
     # Copies CA public key to all services
+    src = pathlib.Path("./certs/_master/ca.crt")
     for service in ["s3", "influxdb", "grafana", "sfc", "utils", "explorer"]:
-        src = pathlib.Path("./certs/_master/ca.crt")
         dst = pathlib.Path(f"./certs/{service}/ca.crt")
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(src.read_bytes())
+
+    # Keep legacy Docker build context input in sync for influxdb/Dockerfile:
+    # COPY ./ca.crt /home/influxdb3/certs/ca.crt
+    legacy_influxdb_ca = pathlib.Path("./influxdb/ca.crt")
+    legacy_influxdb_ca.parent.mkdir(parents=True, exist_ok=True)
+    legacy_influxdb_ca.write_bytes(src.read_bytes())
     return
 
 

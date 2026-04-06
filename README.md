@@ -39,7 +39,7 @@ Grafana has to be user-provided and dashboards created once InfluxDB is added as
 ### Requirements
 
 - Environment
-  - SolidFire 12 (NetApp HCI, NetApp eSDS)
+  - SolidFire 12.5 (NetApp HCI, NetApp eSDS)
   - Recent Python 3 (see `sfc/requirements.txt` for 2 main dependencies) on host or a container platform
   - CPU and RAM requirements: SFC is expected to use around 1-2% CPU and 70MB RAM (guesstimate for hard limits: 5% CPU, 100 MB RAM).
   - Disk requirements for SFC are just the container itself. If InfluxDB tiers to S3, a small SolidFire cluster might create around 25 MB of new data per day on S3 bucket (without down-sampling)
@@ -337,7 +337,7 @@ If you wonder what's what in `docker-compose.yaml`:
 - `influxdb` - InfluxDB 3 Core, exposed on a secure port (HTTPS, 8181) and protected from anonymous access. It stores data on local disk
 - `sfc` - SolidFire Collector. Does not provide service on any port
 - `s3` - Versity S3 Gateway service can be used by InfluxDB 3 Core as its back-end tier for almost all data. You can tier InfluxDB data to another place if you want. It is exposed on the host (HTTPS, port 8443) but protected from anonymous access. If you don't use it, you may remove or disable this container
-- `utils-container` - container with AWS and InfluxDB utilities if you need to troubleshoot any server. It pre-loads S3 and InfluxDB credentials, but you may remove it if you don't want that around. It does not provide service on any port.
+- `utils` - container with AWS and InfluxDB utilities if you need to troubleshoot any server. It pre-loads S3 and InfluxDB credentials, but you may remove it if you don't want that around. It does not provide service on any port.
 - `grafana` - just for testing and prototyping, with no pre-loaded dashboards. It uses (**HTTPS**, 3000) by default. Users are expected to use own Grafana and connect to InfluxDB on host using HTTPS/8181
 
 ```sh

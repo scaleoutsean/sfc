@@ -190,4 +190,7 @@ data/**/*
 # Ignore certificate files in sfc/certs/ but keep directory
 sfc/certs/*
 !sfc/certs/.gitkeep
+
+# Generated local build-context CA file for influxdb Docker build
+influxdb/ca.crt
 RELEASE.md
