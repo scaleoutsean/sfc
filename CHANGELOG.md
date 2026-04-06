@@ -21,7 +21,8 @@
 - Update base container image (Python Alpine)
 - Update 3rd party packages (InfluxDB, InfluxDB UI, Grafana) in Docker Compose
 - Build GHCR container images (note that they can't run with internal certificates as SFC does not have a way to ignore invalid TLS certificates)
-- Make CA generation and handling more convenient with `--download-solidfire-cert yes --solidfire-host <fqdn>`
+- Make CA generation and handling more convenient with `--download-solidfire-cert yes --solidfire-host <fqdn>`, improve checks
+- Cosmetic changes (silence remove some warnings)
 
 ## Changes in v2.1.1
 

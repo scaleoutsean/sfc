@@ -5,7 +5,9 @@
     - [Requirements](#requirements)
   - [Quick start](#quick-start)
     - [SFC in containers](#sfc-in-containers)
+    - ['influxdb' container](#influxdb-container)
     - [`utils` container](#utils-container)
+  - [`explorer` container](#explorer-container)
   - [`sfc.py`](#sfcpy)
     - [Security notes](#security-notes)
   - [CA and TLS configuration](#ca-and-tls-configuration)
@@ -116,8 +118,27 @@ For the entire stack (InfluxDB, SFC...), prepare `.env` file and certificates:
 # python3 certs/_master/gen_ca_tls_certs.py --service all --download-solidfire-cert no
 
 # Docker services can't start without TLS certificates, so use the above or BOYCerts and copy to appropriate paths 
-docker compose up -d
+docker compose up 
+# Watch for API token from InfluxDB and store it carefully because it can't be recovered (any v3, as of 3.9.0)
 ```
+
+### 'influxdb' container
+
+InfluxDB 3 is still tricky to set up for production. It was much worse, but now they have a "dev mode" setup that makes it easy to recover admin access.
+
+The SFC stack does not use dev mode. When you start InfluxDB, it will attempt to create these tokens. Watch the logs and store them carefully. You may see something like this.
+
+```sh
+influxdb3-core  | SFC token creation response: 
+influxdb3-core  | New token created successfully!
+influxdb3-core  | 
+influxdb3-core  | Token: apiv3_IjuyiyyuFKbdz6umEucgv81XMOJ2ssvXCnlswBlICf6OHnQ0EAGKvNHNgDE3fc-3lygCLHpvvS4QCbyJOgybmg
+influxdb3-core  | HTTP Requests Header: Authorization: Bearer apiv3_IjuyiyyuFKbdz6umEucgv81XMOJ2ssvXCnlswBlICf6OHnQ0EAGKvNHNgDE3fc-3lygCLHpvvS4QCbyJOgybmg
+influxdb3-core  | 
+influxdb3-core  | IMPORTANT: Store this token securely, as it will not be shown again.
+```
+
+Alternatively, set up own InfluxDB 3 from scratch and you don't have to care about this.
 
 ### `utils` container
 
@@ -139,49 +160,58 @@ $ docker-compose exec utils bash -c 'TOKEN=$(cat /influxdb_tokens/sfc.token) && 
 | public        | iox                | drive_stats                         | BASE TABLE |
 ```
 
+## `explorer` container
+
+InfluxDB 3 UI is a very nice UI for InfluxDB 3 Core. By default, Docker Compose will start it on port 28443 and use TLS certificate. All good. But you won't be able to add InfluxDB server unless InfluxDB 3 UI can trust that CA.
+
+![TLS required](./images/sfc-influxdb-explorer.png)
+
+If TLS certificates are correctly deployed and Explorer then built, you should be able to connect to `https://influxdb:8181` (not `localhost`, and not `:8086`) in the same Docker Compose stack. You'll need that (or other) valid token from your InfluxDB instance.
+
+![Configure SFC](./images/sfc-influxdb-explorer_configured.png)
+
 ## `sfc.py`
 
 After we descend to the `sfc` directory, create a Python virtual environment and install modules from `sfc/requirements.txt`:
 
 ```sh
-usage: sfc.py [-h] [-m [MVIP]] [-u USERNAME] [-p PASSWORD] [-ih [INFLUXDB_HOST]] [-ip [INFLUXDB_PORT]] [-id [INFLUXDB_NAME]] [-it [INFLUXDB_TOKEN]] [-fh [HI]] [-fm [MED]] [-fl [LO]] [-ex] [-ll [{DEBUG,INFO,WARNING,ERROR,CRITICAL}]] [-lf [LOGFILE]] [-c CA_CHAIN] [--no-instrumenting] [-v]
+usage: sfc.py [-h] [-m [MVIP]] [-u USERNAME] [-p PASSWORD] [-ih [INFLUXDB_HOST]] [-ip [INFLUXDB_PORT]] [-id [INFLUXDB_NAME]] [-it [INFLUXDB_TOKEN]] [-fh [HI]] [-fm [MED]] [-fl [LO]] [-ex]
+              [-ll [{DEBUG,INFO,WARNING,ERROR,CRITICAL}]] [-lf [LOGFILE]] [-c CA_CHAIN] [--insecure-sf] [--no-instrumenting] [-v]
 
 Collects SolidFire metrics and sends them to InfluxDB.
 
 options:
   -h, --help            show this help message and exit
-  -m [MVIP], --mvip [MVIP]
-                        MVIP or FQDN of SolidFire cluster from which metrics should be collected.
-  -u USERNAME, --username USERNAME
+  -m, --mvip [MVIP]     MVIP or FQDN of SolidFire cluster from which metrics should be collected.
+  -u, --username USERNAME
                         username for SolidFire array. Default: SF_USERNAME
-  -p PASSWORD, --password PASSWORD
+  -p, --password PASSWORD
                         password for admin account on SolidFire cluster. Default: SF_PASSWORD or, if empty, prompt to provide it.
-  -ih [INFLUXDB_HOST], --influxdb-host [INFLUXDB_HOST]
+  -ih, --influxdb-host [INFLUXDB_HOST]
                         host IP or name of InfluxDB. Default: 192.168.1.169
-  -ip [INFLUXDB_PORT], --influxdb-port [INFLUXDB_PORT]
+  -ip, --influxdb-port [INFLUXDB_PORT]
                         HTTPS port of InfluxDB. Default: 8181
-  -id [INFLUXDB_NAME], --influxdb-name [INFLUXDB_NAME]
+  -id, --influxdb-name [INFLUXDB_NAME]
                         name of InfluxDB database to use. SFC creates it if it does not exist. Default: sfc
-  -it [INFLUXDB_TOKEN], --influxdb-token [INFLUXDB_TOKEN]
+  -it, --influxdb-token [INFLUXDB_TOKEN]
                         InfluxDB 3 API authentication token. Will prioritize token file, then this argument, then environment variable.
-  -fh [HI], --frequency-high [HI]
+  -fh, --frequency-high [HI]
                         high-frequency collection interval in seconds. Default: 60
-  -fm [MED], --frequency-med [MED]
+  -fm, --frequency-med [MED]
                         medium-frequency collection interval in seconds. Default: 600
-  -fl [LO], --frequency-low [LO]
+  -fl, --frequency-low [LO]
                         low-frequency collection interval in seconds. Default: 3600
   -ex, --experimental   use this switch to enable collection of experimental metrics such as volume QoS histograms (interval: 600s, fixed). Default: (disabled, with switch absent)
-  -ll [{DEBUG,INFO,WARNING,ERROR,CRITICAL}], --loglevel [{DEBUG,INFO,WARNING,ERROR,CRITICAL}]
+  -ll, --loglevel [{DEBUG,INFO,WARNING,ERROR,CRITICAL}]
                         log level for console output. Default: INFO
-  -lf [LOGFILE], --logfile [LOGFILE]
+  -lf, --logfile [LOGFILE]
                         log file name. SFC logs only to console by default. Default: None
-  -c CA_CHAIN, --ca-chain CA_CHAIN
-                        Optional CA certificate file(s) to be copied to the Ubuntu/Debian/Alpine OS certificate store. For multiple files, separate with commas (e.g., "ca1.crt,ca2.crt"). Can be set via CA_CHAIN
-                        environment variable. Users of other systems may import manually. Default: None
+  -c, --ca-chain CA_CHAIN
+                        Optional CA certificate file(s) to be copied to the Ubuntu/Debian/Alpine OS certificate store. For multiple files, separate with commas (e.g., "ca1.crt,ca2.crt"). Can be set via
+                        CA_CHAIN environment variable. Users of other systems may import manually. Default: None
+  --insecure-sf         Disable TLS certificate verification for SolidFire API calls (insecure). Prefer using trusted CA certificates instead. Default: False
   --no-instrumenting    Disable function performance instrumentation to improve collection speed when InfluxDB writes are slow.
   -v, --version         Show program version and exit.
-
-Author: @scaleoutSean https://github.com/scaleoutsean/sfc License: the Apache License 2.0
 
 ```
 

@@ -86,6 +86,7 @@ services:
       INFLUXDB3_AUTH_TOKEN_FILE: /influxdb_tokens/sfc.token
       INFLUXDB3_TLS_CA: /home/sfcuser/sfc_certs/ca.crt
       CA_CHAIN: /home/sfcuser/sfc_certs/sf_ca.crt,/home/sfcuser/sfc_certs/influxdb_ca.crt
+      TZ: UTC
       INT_HI_FREQ: ${SFC_HI_FREQ}
       INT_MED_FREQ: ${SFC_MED_FREQ}
       INT_LO_FREQ: ${SFC_LO_FREQ}

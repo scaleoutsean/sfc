@@ -121,6 +121,19 @@ def sf_ssl_for_connector():
     return False
 
 
+def build_sf_connector(*, timeout_ceil_threshold=None, force_close=False):
+    # Python 3.15+ ignores enable_cleanup_closed and emits noisy deprecation warnings.
+    kwargs = {
+        'ssl': sf_ssl_for_connector(),
+        'force_close': force_close,
+    }
+    if timeout_ceil_threshold is not None:
+        kwargs['timeout_ceil_threshold'] = timeout_ceil_threshold
+    if sys.version_info < (3, 15):
+        kwargs['enable_cleanup_closed'] = True
+    return aiohttp.TCPConnector(**kwargs)
+
+
 async def sf_api_post(session, url, payload, auth):
     """
     Helper for SolidFire API POST requests with debug logging and required auth.
@@ -2220,7 +2233,7 @@ async def hi_freq_tasks(auth):
         " (will be used by all tasks in this cycle)")
     
     session = aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=sf_ssl_for_connector(), enable_cleanup_closed=True), 
+        connector=build_sf_connector(),
         headers=sf_headers
     )
     task_list = [cluster_faults, cluster_performance,
@@ -2246,7 +2259,7 @@ async def med_freq_tasks(auth):
     """
     time_start = round(time.time(), 3)
     session = aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=sf_ssl_for_connector(), enable_cleanup_closed=True, timeout_ceil_threshold=15), 
+        connector=build_sf_connector(timeout_ceil_threshold=15),
         headers=sf_headers
     )
     task_list = [accounts, cluster_capacity, iscsi_sessions, volumes]
@@ -2271,7 +2284,7 @@ async def lo_freq_tasks(auth):
     """
     time_start = round(time.time(), 3)
     session = aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=sf_ssl_for_connector(), enable_cleanup_closed=True, timeout_ceil_threshold=30), 
+        connector=build_sf_connector(timeout_ceil_threshold=30),
         headers=sf_headers
     )
     task_list = [account_efficiency, cluster_version,
@@ -2297,7 +2310,7 @@ async def experimental(auth):
     """
     time_start = round(time.time(), 3)
     session = aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=sf_ssl_for_connector(), enable_cleanup_closed=True, timeout_ceil_threshold=20), 
+        connector=build_sf_connector(timeout_ceil_threshold=20),
         headers=sf_headers
     )
     task_list = [schedules, snapshot_groups, volume_qos_histograms]
@@ -2323,7 +2336,7 @@ async def get_cluster_name(auth):
     time_start = round(time.time(), 3)
     url = SF_URL + SF_JSON_PATH + '?method=GetClusterInfo'
     async with aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=sf_ssl_for_connector(), force_close=True, enable_cleanup_closed=True), 
+        connector=build_sf_connector(force_close=True),
         headers=sf_headers, 
         auth=auth
     ) as session:
@@ -2394,7 +2407,7 @@ async def run_all_sf_tasks(auth):
     Create dedicated session for SolidFire API calls with correct auth and headers, and run all SF tasks.
     """
     async with aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=sf_ssl_for_connector(), enable_cleanup_closed=True),
+        connector=build_sf_connector(),
         auth=auth,
         headers=sf_headers
     ) as session:
@@ -2548,7 +2561,7 @@ if __name__ == '__main__':
         '--insecure-sf',
         action='store_true',
         required=False,
-        help='Disable TLS certificate verification for SolidFire API calls (insecure). Prefer using trusted CA certificates instead.')
+        help='Disable TLS certificate verification for SolidFire API calls (insecure). Prefer using trusted CA certificates instead. Default: False')
     parser.add_argument('--no-instrumenting', action='store_true', required=False,
                         help='Disable function performance instrumentation to improve collection speed when InfluxDB writes are slow.')
     parser.add_argument('-v', '--version', action='store_true', required=False,

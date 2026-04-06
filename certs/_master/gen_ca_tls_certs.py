@@ -17,6 +17,9 @@ import logging
 import re
 import ssl
 import sys
+import ipaddress
+import tempfile
+import fnmatch
 from typing import Tuple
 
 USE_SUDO = False
@@ -424,6 +427,67 @@ def _safe_cert_filename(host: str) -> str:
     return safe or "solidfire"
 
 
+def _extract_san_entries_from_pem(pem_data: str) -> Tuple[list, list]:
+    """Return (dns_names, ip_names) parsed from certificate SAN."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".crt", delete=False, encoding="utf-8") as tmp:
+        tmp.write(pem_data)
+        tmp_path = tmp.name
+
+    try:
+        result = subprocess.run(
+            ["openssl", "x509", "-in", tmp_path, "-noout", "-ext", "subjectAltName"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        output = result.stdout
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    dns_names = []
+    ip_names = []
+    # Example line: DNS:influxdb, DNS:localhost, IP Address:127.0.0.1
+    for line in output.splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        for part in parts:
+            if part.startswith("DNS:"):
+                dns_names.append(part[len("DNS:"):].strip())
+            elif part.startswith("IP Address:"):
+                ip_names.append(part[len("IP Address:"):].strip())
+
+    return dns_names, ip_names
+
+
+def _host_matches_san(host: str, dns_names: list, ip_names: list) -> bool:
+    host = host.strip()
+    if not host:
+        return False
+
+    try:
+        host_ip = ipaddress.ip_address(host)
+        normalized_ips = set()
+        for ip in ip_names:
+            try:
+                normalized_ips.add(str(ipaddress.ip_address(ip)))
+            except ValueError:
+                continue
+        return str(host_ip) in normalized_ips
+    except ValueError:
+        pass
+
+    host_l = host.lower()
+    for dns in dns_names:
+        dns_l = dns.lower()
+        if dns_l == host_l:
+            return True
+        if "*" in dns_l and fnmatch.fnmatch(host_l, dns_l):
+            return True
+    return False
+
+
 def maybe_download_solidfire_certificate(download_mode: str = "auto", solidfire_host: str = ""):
     """Optionally download SolidFire endpoint certificate and store it for SFC trust use.
 
@@ -470,6 +534,19 @@ def maybe_download_solidfire_certificate(download_mode: str = "auto", solidfire_
     except Exception as exc:
         logging.error("Failed to download SolidFire certificate from %s: %s", endpoint, exc)
         return
+
+    try:
+        dns_names, ip_names = _extract_san_entries_from_pem(pem_data)
+        if not _host_matches_san(host, dns_names, ip_names):
+            logging.warning(
+                "Downloaded SolidFire certificate SAN does not include requested host '%s'. "
+                "TLS hostname verification will fail unless you use a matching DNS name or disable verification.",
+                host,
+            )
+            if dns_names or ip_names:
+                logging.warning("Certificate SAN entries: DNS=%s IP=%s", dns_names, ip_names)
+    except Exception as exc:
+        logging.warning("Could not inspect SAN entries in downloaded SolidFire certificate: %s", exc)
 
     cert_name = _safe_cert_filename(host) + ".crt"
 
