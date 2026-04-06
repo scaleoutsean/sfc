@@ -8,6 +8,8 @@ RUN apt-get update && \
     apt-get install -y curl python3 python3-pip ca-certificates wget && \
     rm -rf /usr/lib/python3.13/EXTERNALLY-MANAGED && \
     pip3 install --no-cache-dir awscli && \
+    curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc && \
+    chmod +x /usr/local/bin/mc && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /home/influx/.influxdb && \

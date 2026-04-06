@@ -8,6 +8,7 @@
     - ['influxdb' container](#influxdb-container)
     - [`utils` container](#utils-container)
   - [`explorer` container](#explorer-container)
+  - [`s3` container](#s3-container)
   - [`sfc.py`](#sfcpy)
     - [Security notes](#security-notes)
   - [CA and TLS configuration](#ca-and-tls-configuration)
@@ -124,6 +125,14 @@ docker compose up
 # It should be saved on disk as well, but just in case. Also, you can remove it from disk and load from secrets or other place.
 ```
 
+Versity S3 Gateway now uses the upstream image (`docker.io/versity/versitygw:latest`) directly, including Web UI support.
+
+- S3 API listens on `127.0.0.1:${S3_PORT}` (container port `7070`).
+- Web UI listens on `127.0.0.1:${S3_WEBUI_PORT}` (container port `7443`) when enabled.
+- S3 data is persisted under `./data/gw` and versioning/iam data under `./data/vers`.
+- `S3_WEBUI_ENABLED=false` is the default in `.env.example` to reduce accidental exposure.
+- If Web UI login reports CORS errors, set `VGW_CORS_ALLOW_ORIGIN` to your exact UI origin (for example `https://localhost:9443`).
+
 ### 'influxdb' container
 
 InfluxDB 3 is still tricky to set up for production. It was much worse, but now they have a "dev mode" setup that makes it easy to recover admin access.
@@ -171,6 +180,18 @@ InfluxDB 3 UI is a very nice UI for InfluxDB 3 Core. By default, Docker Compose 
 If TLS certificates are correctly deployed and Explorer container then built and started, connect to `https://influxdb:8181` (not `localhost`, and not `:8086`) in the same Docker Compose stack. You'll need that (or other) valid token from your InfluxDB instance.
 
 ![Configure SFC](./images/sfc-influxdb-explorer_configured.png)
+
+## `s3` container
+
+InfluxDB isn't setup to tier to S3, but it can be with only minor configuration changes. See InfluxDB documentation for the instructions about using S3.
+
+Note that `.env.example` has placeholder credentials. To protect S3, Web UI is disabled by default (`S3_WEBUI_ENABLED=false`) and S3 serves only on `127.0.0.1:<S3_PORT>`. Update placeholder credentials and adjust S3 service ports in Docker Compose if you need to use S3 API and Web UI from remote hosts.
+
+If `s3` container is started, it comes with pre-created `influxdb` bucket, so all it takes to set up tiering is a change in InfluxDB configuration.
+
+![Versity S3 Gateway UI](./images/sfc-s3-web-ui.png)
+
+If the entire stack is running on SolidFire, it doesn't make much sense to tier from InfluxDB to S3, so this is by default not set up. But if you have [E-Series](https://scaleoutsean.github.io/2026/03/07/versity-s3-gateway-netapp-eseries-santricity-csi.html) or other NL-SAS storage and store a lot of SFC data, you may consider tiering InfluxDB to Versity S3 Gateway backed by NL-SAS. Performance impact is to be expected, of course, so adjust your InfluxDB cache as necessary. (Technically this setup is not really tiering - InfluxDB is considered "S3-backed" in that case as only cache and log are stored on block device.)
 
 ## `sfc.py`
 

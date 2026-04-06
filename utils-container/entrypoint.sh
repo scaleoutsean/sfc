@@ -56,6 +56,14 @@ else
   echo "Bucket $BUCKET already exists"
 fi
 
+# Configure MinIO client alias for S3-compatible troubleshooting.
+if command -v mc >/dev/null 2>&1; then
+  mc alias set s3 "$S3_ENDPOINT" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" --api S3v4 || true
+  # Trust custom CA for self-signed/internal PKI.
+  export MC_INSECURE=false
+  mc ls s3 >/dev/null 2>&1 || true
+fi
+
 # Persist credentials for other init steps
 cat > "$CRED_DIR/credentials" <<EOF
 AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
@@ -67,6 +75,18 @@ EOF
 
 echo "Wrote $CRED_DIR/credentials"
 echo "Bucket $BUCKET ready at $S3_ENDPOINT"
+
+# Persist S3 admin/bootstrap credentials for other init workflows.
+if [ -d /s3_data ]; then
+  cat > /s3_data/s3_admin_credentials.env <<EOF
+S3_ENDPOINT=${S3_ENDPOINT}
+S3_BUCKET=${BUCKET}
+S3_ACCESS_KEY=${AWS_ACCESS_KEY_ID}
+S3_SECRET_KEY=${AWS_SECRET_ACCESS_KEY}
+EOF
+  chmod 600 /s3_data/s3_admin_credentials.env || true
+  echo "Wrote /s3_data/s3_admin_credentials.env"
+fi
 
 # Create InfluxDB environment setup script
 mkdir -p /home/influx

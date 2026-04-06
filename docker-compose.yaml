@@ -1,32 +1,44 @@
 services:
   s3:
-    image: sfc/versitys3gw:${VERSITY_S3GW_VERSION}
-    build:
-      context: s3
-      dockerfile: Dockerfile
-      args:
-        VERSITY_S3GW_VERSION: ${VERSITY_S3GW_VERSION}
+    image: ${VERSITY_S3GW_IMAGE:-docker.io/versity/versitygw:latest}
+    entrypoint: ["/bin/sh", "-ec"]
+    environment:
+      VGW_CORS_ALLOW_ORIGIN: ${VGW_CORS_ALLOW_ORIGIN:-https://localhost:9443}
+      VGW_WEBUI_GATEWAYS: https://localhost:${S3_PORT:-8443}
+    command:
+      - |
+        if [ "${S3_WEBUI_ENABLED:-true}" = "true" ]; then
+          exec versitygw \
+            --access "${S3_ACCESS_KEY}" \
+            --secret "${S3_SECRET_KEY}" \
+            --iam-dir /data/vers \
+            --webui 0.0.0.0:7443 \
+            --webui-cert /certs/s3.crt \
+            --webui-key /certs/s3.key \
+            --cert /certs/s3.crt \
+            --key /certs/s3.key \
+            --port 0.0.0.0:7070 \
+            posix --versioning-dir /data/vers /data/gw
+        else
+          exec versitygw \
+            --access "${S3_ACCESS_KEY}" \
+            --secret "${S3_SECRET_KEY}" \
+            --iam-dir /data/vers \
+            --cert /certs/s3.crt \
+            --key /certs/s3.key \
+            --port 0.0.0.0:7070 \
+            posix --versioning-dir /data/vers /data/gw
+        fi
     container_name: s3
     restart: unless-stopped
     volumes:
       - ./certs/s3:/certs:ro
-      - ./data/s3:/data
+      - ./data/vers:/data/vers
+      - ./data/gw:/data/gw
       - ./certs/_master/ca.crt:/certs/ca.crt:ro
     ports:
-      - "${S3_PORT}:7070"
-    environment:
-      ROOT_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
-      ROOT_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
-      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
-      VGW_CERT: /certs/s3.crt
-      VGW_KEY: /certs/s3.key
-      VGW_PORT: "7070"
-      VGW_IP: 0.0.0.0
-      VGW_DATA_DIR: /data
-      VGW_CHOWN_UID: 1000
-      VGW_CHOWN_GID: 1000
-      DEBUG: "false"
+      - "127.0.0.1:${S3_PORT}:7070"
+      - "127.0.0.1:${S3_WEBUI_PORT:-9443}:7443"
     networks:
       sfc:
         ipv4_address: ${S3_IP}
@@ -129,6 +141,7 @@ services:
       - ./certs/influxdb/influxdb.crt:/home/influx/influxdb.crt:ro
       - ./certs/s3/s3.crt:/home/influxdb/s3.crt:ro
       - ./data/influxdb_tokens/sfc.token:/home/influx/sfc.token:ro
+      - ./data/vers:/s3_data
     # No depends_on - utils should be independent for troubleshooting
     command: ["tail","-f","/dev/null"]
 
