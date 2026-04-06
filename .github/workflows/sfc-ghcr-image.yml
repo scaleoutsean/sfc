@@ -29,14 +29,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Load build args from .env
+      - name: Load build args from .env.example
         id: build_args
         run: |
           set -euo pipefail
           for key in PYTHON_VERSION PYTHON_DIGEST APSCHEDULER_VERSION AIOHTTP_VERSION; do
-            value="$(grep -E "^${key}=" .env | head -n1 | cut -d= -f2- || true)"
+            value="$(grep -E "^${key}=" .env.example | head -n1 | cut -d= -f2- || true)"
             if [[ -z "$value" ]]; then
-              echo "Required key '$key' is missing from .env" >&2
+              echo "Required key '$key' is missing from .env.example" >&2
               exit 1
             fi
             echo "${key}=${value}" >> "$GITHUB_OUTPUT"

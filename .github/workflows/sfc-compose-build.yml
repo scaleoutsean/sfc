@@ -26,5 +26,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Seed .env from .env.example
+        run: cp .env.example .env
+
       - name: Build SFC service via Compose
         run: docker compose build sfc
