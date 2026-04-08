@@ -34,14 +34,6 @@ echo "[DEBUG] NODE_ID=$NODE_ID"
 echo "[DEBUG] Environment dump:"
 env
 
-
-curl -v --cacert /home/influxdb3/certs/ca.crt https://s3:7070/
-# 
-ls -l /home/influxdb3/certs/ca.crt
-echo ""
-echo ""
-sleep 1
-
 # Export TLS CA certificate path for InfluxDB
 export INFLUXDB3_TLS_CA="${INFLUXDB3_TLS_CA:-/home/influxdb3/certs/ca.crt}"
 
