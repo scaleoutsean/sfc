@@ -466,6 +466,7 @@ Latest NetApp HCI-focused version (HCI Collector v0.7.2) - can be found [here](h
 
 - [SolidFire Exporter](https://github.com/mjavier2k/solidfire-exporter/) - Prometheus exporter
   - Exports "general" SolidFire metrics with (currently) a single schedule for all, potentially may not scale as well as SFC v2
+  - Recommended over SFC if you just want standard Prometheus metrics
   - [Getting started with SolidFire Exporter](https://scaleoutsean.github.io/2021/03/09/get-started-with-solidfire-exporter.html)
 - SolidFire syslog forwarding to Elasticsearch or similar platform 
   - Detailed [steps](https://scaleoutsean.github.io/2021/10/18/solidfire-syslog-filebeat-logstash-elk-stack.html)
