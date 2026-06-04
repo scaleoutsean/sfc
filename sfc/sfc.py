@@ -21,6 +21,7 @@ import argparse
 from argparse import Namespace
 import aiohttp
 import asyncio
+import base64
 from aiohttp import ClientSession, ClientResponseError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import datetime
@@ -46,7 +47,7 @@ os.environ["PYTHONWARNINGS"] = "default"
 
 # =============== default vars ================================================
 
-VERSION = '2.2.0'
+VERSION = '2.2.1'
 
 # Create reporting-only admin user with read-only access to the SolidFire API.
 # Modify these five variables to match your environment if you want hardcoded
@@ -142,7 +143,7 @@ async def sf_api_post(session, url, payload, auth):
         logging.debug(f"[SF DEBUG] POST {url}")
         logging.debug(f"[SF DEBUG] Headers: {sf_headers}")
         logging.debug(f"[SF DEBUG] Payload: {payload}")
-    async with session.post(url, data=payload, headers=sf_headers, auth=auth) as response:
+    async with session.post(url, data=payload, headers=sf_headers) as response:
         if logging.getLogger().isEnabledFor(logging.DEBUG):
             logging.debug(f"[SF DEBUG] Response status: {response.status}")
             logging.debug(f"[SF DEBUG] Response headers: {response.headers}")
@@ -648,7 +649,7 @@ async def sync_jobs(session, auth):
     time_start = round(time.time(), 3)
     function_name = 'sync_jobs'
     api_payload = "{ \"method\": \"ListSyncJobs\" }"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
     result = r['result']['syncJobs']
     if args.loglevel == 'DEBUG':
@@ -788,7 +789,7 @@ async def volume_performance(session, auth, **kwargs):
             logging.info("Volume batch IDs:\n" + str(volume_batch_ids) + ".")
         api_payload = "{ \"method\": \"ListVolumeStats\", \"params\": { \"volumeIDs\": " + \
             str(volume_batch_ids) + "}}"
-        async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+        async with session.post(SF_POST_URL, data=api_payload) as response:
             r = await response.json()
         result = r['result']['volumeStats']
         # NOTE: we need to convert the asyncDelay from null to integer or parse the string to seconds:int
@@ -875,7 +876,7 @@ async def accounts(session, auth):
     function_name = 'accounts'
     accounts = ''
     api_payload = "{ \"method\": \"ListAccounts\" }"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
     for account in r['result']['accounts']:
         if (account['enableChap']):
@@ -915,7 +916,7 @@ async def account_efficiency(session, auth):
     time_start = round(time.time(), 3)
     account_efficiency = '#account_efficiency\n'
     api_payload = "{ \"method\": \"ListAccounts\", \"params\": {}}"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         if response.status != 200:
             text = await response.text()
             logging.error(f"Failed to get accounts. Status: {response.status}, Response: {text}")
@@ -941,7 +942,7 @@ async def account_efficiency(session, auth):
     for account in account_id_name_list:
         api_payload = "{ \"method\": \"GetAccountEfficiency\", \"params\": { \"accountID\": " + \
             str(account[0]) + " }}"
-        async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+        async with session.post(SF_POST_URL, data=api_payload) as response:
             r = await response.json()
         compression = round(r['result']['compression'], 2)
         deduplication = round(r['result']['deduplication'], 2)
@@ -970,7 +971,7 @@ async def volume_efficiency(session, auth):
     volume_efficiency = "#volume_efficiency\n"
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"ListVolumes\", \"params\": {}}"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
         volume_id_name_list = []
         for volume in r['result']['volumes']:
@@ -980,7 +981,7 @@ async def volume_efficiency(session, auth):
         for volume in short_list:
             api_payload = "{ \"method\": \"GetVolumeEfficiency\", \"params\": { \"volumeID\": " + \
                 str(volume[0]) + " }}"
-            async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+            async with session.post(SF_POST_URL, data=api_payload) as response:
                 r = await response.json()
                 compression = round(r['result']['compression'], 2)
                 deduplication = round(r['result']['deduplication'], 2)
@@ -1008,7 +1009,7 @@ async def cluster_faults(session, auth):
     time_start = round(time.time(), 3)
     function_name = 'cluster_faults'
     api_payload = "{ \"method\": \"ListClusterFaults\" }"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
     group = {'bestPractices': 0, 'error': 0, 'critical': 0, 'warning': 0}
     for fault in r['result']['faults']:
@@ -1057,7 +1058,7 @@ async def volume_qos_histograms(session, auth):
         logging.error(e)
         return
     api_payload = "{ \"method\": \"ListVolumeQoSHistograms\" }"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
         result = r['result']['qosHistograms']
     qosh_list = await _split_list(result)
@@ -1166,7 +1167,7 @@ async def node_performance(session, auth):
     time_start = round(time.time(), 3)
     function_name = 'node_performance'
     api_payload = "{ \"method\": \"ListNodeStats\" }"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
     result = r['result']['nodeStats']['nodes']
     metrics = [("cpu", "cpu"), ("networkUtilizationCluster", "network_utilization_cluster"),
@@ -1231,7 +1232,7 @@ async def iscsi_sessions(session, auth):
     function_name = 'iscsi_sessions'
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"ListISCSISessions\" }"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
     result = r['result']['sessions']
     fields = [
@@ -1339,7 +1340,7 @@ async def cluster_performance(session, auth):
     function_name = 'cluster_performance'
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"GetClusterStats\" }"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
     result = r['result']['clusterStats']
     metrics = [("actualIOPS", "actual_iops"),
@@ -1394,7 +1395,7 @@ async def cluster_capacity(session, auth):
     function_name = 'cluster_capacity'
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"GetClusterCapacity\" }"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
         result = r['result']['clusterCapacity']
         cluster_capacity = ""
@@ -1493,7 +1494,7 @@ async def cluster_version(session, auth):
     function_name = 'cluster_version'
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"GetClusterVersionInfo\" }"
-    async with session.post(SF_URL + SF_JSON_PATH, data=api_payload, auth=auth) as response:
+    async with session.post(SF_URL + SF_JSON_PATH, data=api_payload) as response:
         r = await response.json(content_type=None)
         result = r['result']
         api_version = str(result['clusterAPIVersion'])
@@ -1517,7 +1518,7 @@ async def drive_stats(session, auth):
     function_name = 'drive_stats'
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"ListDriveStats\" }"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
         result = r['result']['driveStats']
         payload = "# DriveStats\n"
@@ -1575,7 +1576,7 @@ async def schedules(session, auth):
     await asyncio.sleep(sleep_delay)
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"ListSchedules\" }"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
         if args.loglevel == 'DEBUG':
             logging.debug("Schedules response:\n" + str(r))
@@ -1730,7 +1731,7 @@ async def snapshot_groups(session, auth):
     await asyncio.sleep(sleep_delay)
     time_start = round(time.time(), 3)
     api_payload = "{ \"method\": \"ListGroupSnapshots\" }"
-    async with session.post(SF_POST_URL, data=api_payload, auth=auth) as response:
+    async with session.post(SF_POST_URL, data=api_payload) as response:
         r = await response.json()
         if args.loglevel == 'DEBUG':
             logging.debug("Group snapshots response:\n" + str(r))
@@ -2094,7 +2095,7 @@ async def send_to_influx(payload):
         ssl_context = ssl.create_default_context()
         logging.debug('Using default SSL context for InfluxDB connection')
     
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(enable_cleanup_closed=True, ssl=ssl_context)) as session:
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
         if INFLUXDB3_AUTH_TOKEN is None or INFLUXDB3_AUTH_TOKEN == '':
             logging.error('INFLUXDB3_AUTH_TOKEN is not set. Cannot send data to InfluxDB.')
             return False
@@ -2338,7 +2339,6 @@ async def get_cluster_name(auth):
     async with aiohttp.ClientSession(
         connector=build_sf_connector(force_close=True),
         headers=sf_headers, 
-        auth=auth
     ) as session:
         async with session.get(url, allow_redirects=True) as resp:
             if resp.status != 200:
@@ -2384,7 +2384,9 @@ async def main():
         logging.warning(f'Token file {token_file} does not exist')
     
     # Prepare SolidFire auth
-    auth = aiohttp.BasicAuth(args.username, args.password)
+    auth_str = base64.b64encode(f"{args.username}:{args.password}".encode("utf-8")).decode("utf-8")
+    sf_headers['Authorization'] = f"Basic {auth_str}"
+    auth = None
     CLUSTER_NAME = await get_cluster_name(auth)
     
     # Ensure InfluxDB database exists or create it
@@ -2408,7 +2410,6 @@ async def run_all_sf_tasks(auth):
     """
     async with aiohttp.ClientSession(
         connector=build_sf_connector(),
-        auth=auth,
         headers=sf_headers
     ) as session:
         task_list = [

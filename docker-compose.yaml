@@ -88,7 +88,7 @@ services:
         PYTHON_VERSION: ${PYTHON_VERSION}
         PYTHON_DIGEST: ${PYTHON_DIGEST}
         APSCHEDULER_VERSION: ${APSCHEDULER_VERSION:-3.11.2}
-        AIOHTTP_VERSION: ${AIOHTTP_VERSION:-3.13.5}
+        AIOHTTP_VERSION: ${AIOHTTP_VERSION:-3.14.0}
     container_name: sfc
     command: ["--no-instrumenting"]
     environment:
@@ -107,6 +107,7 @@ services:
       SF_USERNAME: ${SF_USERNAME}
       SF_PASSWORD: ${SF_PASSWORD}
       SF_VERIFY_SSL: ${SF_VERIFY_SSL:-true}
+      # SF_VERIFY_SSL: false
     depends_on:
       - influxdb
     volumes:
@@ -146,7 +147,7 @@ services:
     command: ["tail","-f","/dev/null"]
 
   grafana:
-    image: grafana:${GRAFANA_VERSION}
+    image: grafana/grafana:${GRAFANA_VERSION}
     container_name: grafana
     restart: unless-stopped
     ports:

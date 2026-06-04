@@ -1,6 +1,7 @@
 # Change Log
 
 - [Change Log](#change-log)
+  - [Changes in v2.2.1](#changes-in-v221)
   - [Changes in v2.2.0](#changes-in-v220)
   - [Changes in v2.1.1](#changes-in-v211)
   - [Changes in v2.1.0](#changes-in-v210)
@@ -14,6 +15,12 @@
   - [Changes in .3](#changes-in-3)
   - [Changes in .v2](#changes-in-v2)
   - [Changes in .v1](#changes-in-v1)
+
+## Changes in v2.2.1
+
+- Update 3rd party dependency (`aiohttp`) and adjust sfc.py to not use some soon-to-be-deprecated `aiohttp` options
+- Update TLS certificate generator to copy (re)generated certificates to appropriate directories
+- Fix typo in docker-compose.yaml that made Compose unable to download Grafana
 
 ## Changes in v2.2.0
 

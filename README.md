@@ -69,7 +69,7 @@ Then download, install and run SFC:
 
 ```sh
 # release v2.0.0 uses InfluxDB 1; v2.1.0+ use InfluxDB + optional S3 tiering
-git clone -b v2.2.0 https://github.com/scaleoutsean/sfc/
+git clone -b v2.2.1 https://github.com/scaleoutsean/sfc/
 cd sfc/sfc
 python3 -m venv .venv
 source .venv/bin/activate
@@ -92,7 +92,10 @@ See [dashboards.md](./docs/dashboards.md) about visualization, metrics and measu
 
 ### SFC in containers
 
-The main difference when running in Docker Compose is we read InfluxDB API token from file (set in environment variables) whereas when running the CLI we can use `-it` to provide token.
+The main differences when running in Docker Compose are:
+
+-  we read the InfluxDB API token from file (set in environment variables and docker-compose.yaml) whereas when running the CLI we can use `-it` to provide that API token
+-  we generate, and then use, `./certs/sfc/influxdb_ca.crt` to connect to InfluxDB over HTTPS. Both Grafana and SFC use HTTPS to connect
 
 Feel free to modify or build your own with `sfc.py` in it.
 
@@ -103,7 +106,7 @@ SFC verifies SolidFire TLS certificates by default. As a temporary workaround on
 Pre-built containers **will not work** by default if your SolidFire and InfluxDB don't have valid public TLS certificates or don't load them when they run. In such cases this below cannot work unless you build the containers yourself and include at least your CA into container image.
 
 ```sh
-docker run --name=sfc docker.io/scaleoutsean/sfc:v2.2.0 --mvip 192.168.1.30 -u monitor -p ********** -ih 192.168.1.146 -ip 8181 -it ${YOUR-INFLUXDB-API-TOKEN} -id sfc
+docker run --name=sfc docker.io/scaleoutsean/sfc:v2.2.1 --mvip 192.168.1.30 -u monitor -p ********** -ih 192.168.1.146 -ip 8181 -it ${YOUR-INFLUXDB-API-TOKEN} -id sfc
 ```
 
 For the entire stack (InfluxDB, SFC...), prepare `.env` file and certificates:
@@ -147,6 +150,13 @@ influxdb3-core  | Token: apiv3_IjuyiyyuFKbdz6umEucgv81XMOJ2ssvXCnlswBlICf6OHnQ0E
 influxdb3-core  | HTTP Requests Header: Authorization: Bearer apiv3_IjuyiyyuFKbdz6umEucgv81XMOJ2ssvXCnlswBlICf6OHnQ0EAGKvNHNgDE3fc-3lygCLHpvvS4QCbyJOgybmg
 influxdb3-core  | 
 influxdb3-core  | IMPORTANT: Store this token securely, as it will not be shown again.
+```
+
+The token is supposed to appear here:
+
+```sh
+$ cat ./data/influxdb_tokens/sfc.token
+apiv3_R79qmWdX1AOIQ14JtjNNJSkDrNj2UhGvvajlOYSQAbR2RP519Aj24MqC2f73UVjBg_ir3FaB6QBwjRP7mV1-MQ
 ```
 
 Alternatively, set up own InfluxDB 3 from scratch and you don't have to care about this.

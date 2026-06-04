@@ -2,7 +2,7 @@
 ARG PYTHON_VERSION=3.15.0a7-alpine3.22
 ARG PYTHON_DIGEST=sha256:91f42f75ba6a04f0ae571a1010e0dfca3ac79d7d41ee0e366a7f8ab6dc55faad
 ARG APSCHEDULER_VERSION=3.11.2
-ARG AIOHTTP_VERSION=3.13.5
+ARG AIOHTTP_VERSION=3.14.0
 
 FROM docker.io/python:${PYTHON_VERSION}@${PYTHON_DIGEST} AS builder
 # https://hub.docker.com/layers/library/python/3.12.11-alpine3.22/images/sha256-c7faa49938b528b23f0d3f900d6c3e11e16ded420852d327f58267547d26f915
@@ -57,4 +57,4 @@ ENTRYPOINT [ "python" , "/home/sfcuser/sfc.py" ]
 # RUN cat /usr/local/share/ca-certificates/my-cert.crt >> /etc/ssl/certs/ca-certificates.crt 
 
 # How to run SFC from your Docker container: 
-# docker run --name=sfc sfc:v2.2.0 -h
+# docker run --name=sfc sfc:v2.2.1 -h

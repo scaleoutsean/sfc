@@ -269,6 +269,12 @@ def create_influxdb_config():
     )
     _write_text_file(conf_path, conf_text)
 
+    # Sync InfluxDB certificate to SFC directory for trust
+    sfc_cert_dest = pathlib.Path("./certs/sfc/influxdb_ca.crt")
+    _ensure_dir(sfc_cert_dest.parent)
+    _write_bytes_file(sfc_cert_dest, cert_path.read_bytes())
+    logging.info("Synced InfluxDB cert to %s", sfc_cert_dest)
+
     logging.info("InfluxDB TLS material created at %s", str(dest))
     return (key_path, cert_path)
 
