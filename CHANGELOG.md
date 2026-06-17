@@ -1,6 +1,7 @@
 # Change Log
 
 - [Change Log](#change-log)
+  - [Changes in v2.2.2](#changes-in-v222)
   - [Changes in v2.2.1](#changes-in-v221)
   - [Changes in v2.2.0](#changes-in-v220)
   - [Changes in v2.1.1](#changes-in-v211)
@@ -15,6 +16,10 @@
   - [Changes in .3](#changes-in-3)
   - [Changes in .v2](#changes-in-v2)
   - [Changes in .v1](#changes-in-v1)
+
+## Changes in v2.2.2
+
+- Update 3rd party dependency (`aiohttp`) to 3.14.1
 
 ## Changes in v2.2.1
 

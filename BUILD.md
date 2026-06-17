@@ -44,7 +44,7 @@ Each Dockerfile declares `ARG` variables with defaults:
 
 ```dockerfile
 # s3/Dockerfile
-ARG VERSITY_S3GW_VERSION=1.4.0
+ARG VERSITY_S3GW_VERSION=1.5.0
 
 # influxdb/Dockerfile  
 ARG INFLUXDB3_BUILD_VERSION=3.9.0
