@@ -1,6 +1,8 @@
 # Change Log
 
 - [Change Log](#change-log)
+  - [Changes in v2.2.2](#changes-in-v224)
+  - [Changes in v2.2.2](#changes-in-v223)
   - [Changes in v2.2.2](#changes-in-v222)
   - [Changes in v2.2.1](#changes-in-v221)
   - [Changes in v2.2.0](#changes-in-v220)
@@ -16,6 +18,10 @@
   - [Changes in .3](#changes-in-3)
   - [Changes in .v2](#changes-in-v2)
   - [Changes in .v1](#changes-in-v1)
+
+## Changes in v2.2.4
+
+- Update apscheduler to 3.11.3
 
 ## Changes in v2.2.3
 
