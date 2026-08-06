@@ -47,7 +47,7 @@ os.environ["PYTHONWARNINGS"] = "default"
 
 # =============== default vars ================================================
 
-VERSION = '2.2.2'
+VERSION = '2.2.3'
 
 # Create reporting-only admin user with read-only access to the SolidFire API.
 # Modify these five variables to match your environment if you want hardcoded

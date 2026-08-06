@@ -17,6 +17,10 @@
   - [Changes in .v2](#changes-in-v2)
   - [Changes in .v1](#changes-in-v1)
 
+## Changes in v2.2.3
+
+- Update 3rd party dependency (`aiohttp`) to 3.14.3 for CVEs, update apscheduler to 3.11.2, update versions strings in documentation, Dockerifle, .env.example
+
 ## Changes in v2.2.2
 
 - Update 3rd party dependency (`aiohttp`) to 3.14.1

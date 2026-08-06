@@ -27,7 +27,7 @@ Copy `.env.example` to `.env` and edit it. You mostly need to only change the cr
 ### Build-time versions (used as `ARG`s in Dockerfiles)
 
 - `INFLUXDB3_BUILD_VERSION=3.9.0` - InfluxDB3 Core binary version for download
-- `VERSITY_S3GW_VERSION=1.4.0` - Versity S3 Gateway version (leave as is if you don't use S3 tiering)
+- `VERSITY_S3GW_VERSION=1.7.0` - Versity S3 Gateway version (leave as is if you don't use S3 tiering)
 - `PYTHON_VERSION=3.15.0a7-alpine3.22` - Python base image version
 - `PYTHON_DIGEST=sha256:...` - Python image digest for extra security
 
@@ -44,7 +44,7 @@ Each Dockerfile declares `ARG` variables with defaults:
 
 ```dockerfile
 # s3/Dockerfile
-ARG VERSITY_S3GW_VERSION=1.5.0
+ARG VERSITY_S3GW_VERSION=1.7.0
 
 # influxdb/Dockerfile  
 ARG INFLUXDB3_BUILD_VERSION=3.9.0
@@ -89,7 +89,9 @@ Note that if you don't have InfluxDB administrator key and use user or "named" k
 
 ## Smart down-sampling (v2.1.1+)
 
-SFC v2.1.1 includes an embedded smart data lifecycle management system using the official InfluxDB3 down-sampling plugin. This "stored procedures" architecture provides zero-dependency down-sampling with production defaults.
+SFC v2.2.3 includes an embedded smart data lifecycle management system using the official InfluxDB3 down-sampling plugin. This "stored procedures" architecture provides zero-dependency down-sampling with production defaults.
+
+There haven't been any requests for this, so it's no longer tested.
 
 ### Features
 

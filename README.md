@@ -69,7 +69,7 @@ Then download, install and run SFC:
 
 ```sh
 # release v2.0.0 uses InfluxDB 1; v2.1.0+ use InfluxDB + optional S3 tiering
-git clone -b v2.2.1 https://github.com/scaleoutsean/sfc/
+git clone -b v2.2.3 https://github.com/scaleoutsean/sfc/
 cd sfc/sfc
 python3 -m venv .venv
 source .venv/bin/activate
@@ -106,7 +106,7 @@ SFC verifies SolidFire TLS certificates by default. As a temporary workaround on
 Pre-built containers **will not work** by default if your SolidFire and InfluxDB don't have valid public TLS certificates or don't load them when they run. In such cases this below cannot work unless you build the containers yourself and include at least your CA into container image.
 
 ```sh
-docker run --name=sfc docker.io/scaleoutsean/sfc:v2.2.1 --mvip 192.168.1.30 -u monitor -p ********** -ih 192.168.1.146 -ip 8181 -it ${YOUR-INFLUXDB-API-TOKEN} -id sfc
+docker run --name=sfc docker.io/scaleoutsean/sfc:v2.2.3 --mvip 192.168.1.30 -u monitor -p ********** -ih 192.168.1.146 -ip 8181 -it ${YOUR-INFLUXDB-API-TOKEN} -id sfc
 ```
 
 For the entire stack (InfluxDB, SFC...), prepare `.env` file and certificates:
