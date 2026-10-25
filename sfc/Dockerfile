@@ -1,11 +1,11 @@
 # Set default Python version (can be overridden at build time)
-ARG PYTHON_VERSION=3.15.0a7-alpine3.22
-ARG PYTHON_DIGEST=sha256:91f42f75ba6a04f0ae571a1010e0dfca3ac79d7d41ee0e366a7f8ab6dc55faad
+ARG PYTHON_VERSION=3.15.1-alpine-3.24
+ARG PYTHON_DIGEST=sha256:d44b1254cb92329418d164b22b20d86bbd3869d48e80e09e476531a409a728bb
 ARG APSCHEDULER_VERSION=3.11.3
 ARG AIOHTTP_VERSION=3.14.4
 
 FROM docker.io/python:${PYTHON_VERSION}@${PYTHON_DIGEST} AS builder
-# https://hub.docker.com/layers/library/python/3.12.11-alpine3.22/images/sha256-c7faa49938b528b23f0d3f900d6c3e11e16ded420852d327f58267547d26f915
+# https://hub.docker.com/layers/library/python/3.15-alpine3.24/images/sha256-a84283f1b91fb0cd42f88558f221bac04a09bf03648b6c7be41c47e076a15d12
 
 # Re-declare args after FROM so they are available during this stage.
 ARG APSCHEDULER_VERSION
